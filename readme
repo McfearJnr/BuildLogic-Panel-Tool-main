@@ -7,6 +7,8 @@ __________      .__.__       .___ .____                 .__
         \/                    \/          \/    /_____/         \/ 
 -->
 
+---------------------------------------------------------------------------------------------------------------------
+
 Required Files:
 `eeprom.txt`
 `lines.txt`
@@ -24,17 +26,31 @@ Required Files:
 `1 lines.txt -> eeprom.py`
 `2 eeprom -> savestring.txt`
 
+---------------------------------------------------------------------------------------------------------------------
+
 // How to use `1 lines.txt -> eeprom.py`:
 
 Clone this Github Repository.
-Ensure python and colorama are installed.
+`Ensure python and the following modules are installed:`
+1. `colorama`
+2. `clipboard`
+
+[[These modules MUST be installed, the commands for them are as followed:]]
+pip install colorama
+pip install clipboard
+
+---------------------------------------------------------------------------------------------------------------------
 
 1. Draw a screen design (RGB2 16x16 Panel) inside of `lines.txt`
 2. Save design and use `1 lines.txt -> eeprom.py` to turn the design into binary.
 4. (OPTIONAL) - Repeat steps 1-2, and change save file to another un-used save.
 6. Use `2 eeprom -> savestring.py` to turn the binary saves into a build logic save string. (Instructions for `2 eeprom -> savestring.py` found below.)
 
+---------------------------------------------------------------------------------------------------------------------
+
 // How to use `2 eeprom -> savestring.py`:
+
+---------------------------------------------------------------------------------------------------------------------
 
 1. When prompted `How many save files will you be including`, enter the number of saves you have used. Wait for assets to load, then enter `Y` when prompted `16 bit eeprom? y/n`.
 2. When asked which file to use for boot (File saved at address 0, other file is saved at address 1) enter either 0 for file1, or 1 for file2.
