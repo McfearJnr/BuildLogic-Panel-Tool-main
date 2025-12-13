@@ -12,6 +12,14 @@ Required Files:
 `lines.txt`
 `save1.txt`
 `save2.txt`
+`save3.txt`
+`save4.txt`
+`save5.txt`
+`save6.txt`
+`save7.txt`
+`save8.txt`
+`save9.txt`
+`save10.txt`
 `BinaryChars.json`
 `1 lines.txt -> eeprom.py`
 `2 eeprom -> savestring.txt`
@@ -22,15 +30,13 @@ Clone this Github Repository.
 Ensure python and colorama are installed.
 
 1. Draw a screen design (RGB2 16x16 Panel) inside of `lines.txt`
-2. Save design and use `1 lines.txt -> eeprom.py` to turn the design into binary. (Output is in `eeprom.txt`)
-3. Copy outputted design from `eeprom.txt` and paste into either `save1.txt` or `save2.txt`.
-4. (OPTIONAL) - Repeat steps 1-3, and paste output into the other save file.
-5. `Important` - Ensure you have saved both `save1.txt` and `save2.txt`.
+2. Save design and use `1 lines.txt -> eeprom.py` to turn the design into binary.
+4. (OPTIONAL) - Repeat steps 1-2, and change save file to another un-used save.
 6. Use `2 eeprom -> savestring.py` to turn the binary saves into a build logic save string. (Instructions for `2 eeprom -> savestring.py` found below.)
 
 // How to use `2 eeprom -> savestring.py`:
 
-1. Wait for assets to load, then enter `Y` when prompted `16 bit eeprom? y/n`.
+1. When prompted `How many save files will you be including`, enter the number of saves you have used. Wait for assets to load, then enter `Y` when prompted `16 bit eeprom? y/n`.
 2. When asked which file to use for boot (File saved at address 0, other file is saved at address 1) enter either 0 for file1, or 1 for file2.
 3. Wait for the script to proccess your files.
 4. Once completed, the output will be pasted into your clipboard.
