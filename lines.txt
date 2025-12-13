@@ -1,16 +1,1 @@
-PMV3
-////////////////
-
-Power Status:
-Waiting...//(yellow)
-
-Facility Status:
-Waiting...//(yellow)
-
-
-
-
-
-
-
-Page 1 of 2.
+Your text here.
