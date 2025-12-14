@@ -1,6 +1,6 @@
 # 🧩 BuildLogic Panel Suite
 
-A simple but powerful tool for designing **16×16 graphics** for Build Logic panels.
+A simple but powerful tool for designing **16×16 graphics** for Build Logic 16x16 rgb2 panels.
 
 Create pixel-perfect designs, export them cleanly, and get them straight into your builds without messing about.
 
@@ -9,7 +9,7 @@ Create pixel-perfect designs, export them cleanly, and get them straight into yo
 ## ✨ Features
 
 - 🟩 **16×16 pixel editor**
-- 🎨 Full colour + character support (Build Logic compatible)
+- 🎨 Full colour + character suppor
 - 📁 Save & load designs easily
 - 🛠 Built specifically for **Build Logic** panels
 - 💻 Simple desktop app — no browser nonsense
@@ -53,4 +53,3 @@ Designed to stay out of your way and just let you build.
 <img width="1600" height="1194" alt="image" src="https://github.com/user-attachments/assets/b285e1b9-f3b0-47e5-9425-3569b032a130" />
 
 ```md
-![Editor Preview](screenshots/editor.png)
