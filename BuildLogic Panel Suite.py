@@ -1,5 +1,12 @@
 import customtkinter as ctk
+ctk.set_widget_scaling(0.7)
+ctk.set_window_scaling(0.7)
 import tkinter as tk
+
+root = tk.Tk()
+root.tk.call("tk", "scaling", 0.75)
+root.destroy()
+
 from tkinter import filedialog, messagebox
 import json
 import os
@@ -19,23 +26,42 @@ ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("dark-blue")
 
 # Attempt to load Segoe UI font (may fail on non-Windows/non-standard setups)
+# Try cross-platform defaults first, then Segoe UI.
 try:
+    # Use a standard font like 'Arial' or 'Helvetica' as a fallback base
+    FONT_FAMILY = "Helvetica" 
+    
+    # Try loading Segoe UI if available (Windows)
     ctk.FontManager.load_font("C:/Windows/Fonts/segoeui.ttf")
     FONT_FAMILY = "Segoe UI"
 except Exception:
-    FONT_FAMILY = "Roboto"
+    # Fallback remains 'Helvetica' or 'Roboto'
+    pass
+
+# Ensure your constants use the finalized FONT_FAMILY
 
 THEME = {
     "bg": "#0f0f0f",
-    "surface": "#1a1a1a",
-    "surface_2": "#202020",
+    "surface": "#1a1a1a",     # Primary container/card background
+    "surface_2": "#202020",   # Secondary container/sidebar background
     "border": "#2a2a2a",
-    "accent": "#268f07",
-    "accent_hover": "#226b0c",
-    "danger": "#dc2626",
-    "success": "#16a34a",
-    "text": "#e5e5e5",
-    "muted": "#9ca3af",
+    
+    # Text colors
+    "text": "#e5e5e5",        # High contrast text
+    "muted": "#9ca3af",       # Secondary/placeholder text
+    
+    # Primary Accent (Bright Green)
+    "accent": "#0e75c4",   
+    "accent_hover": "#135f9a",
+    
+    # Semantic Colors
+    "danger": "#dc2626",      # For clear grid
+    "error": "#dc2626",       # Red for error messages/remove buttons
+    "error_hover": "#ae1919",
+    "info": "#0e75c4",        # Blue for info/saving
+    "info_hover": "#135f9a",
+    "success": "#16a34a",     # Darker green for COMPILING button (good contrast)
+    "success_hover": "#0f7534",
 }
 
 Legacy_BTN_STYLE = {
@@ -52,6 +78,12 @@ BTN_STYLE = {
     #"fg_color": "#268f07" - lowk looks shit rn, todo: pick new color :cool_guy:
 }
 
+BTN_STYLE_HM = {
+    #"height": 34, # Slightly reduced for better spacing - no height mod for buttons which have custom heights
+    "corner_radius": 6, # Slightly reduced corner radius
+    "font": (FONT_FAMILY, 11),
+    #"fg_color": "#268f07" - lowk looks shit rn, todo: pick new color :cool_guy:
+}
 GRID_SIZE = 16
 
 COLOR_MAP = {
@@ -76,7 +108,7 @@ class CombinedEEPROMApp(ctk.CTk):
 
         self.configure(fg_color=THEME["bg"])
         self.title("BuildLogic Panel Studio Pro")
-        self.minsize(1500, 1100) # Increased min size to fit new layout
+        self.minsize(1800, 1200) 
         
         # --- Resources ---
         self.binary_chars = self.load_char_map()
@@ -155,135 +187,185 @@ class CombinedEEPROMApp(ctk.CTk):
 
     # --- DESIGNER LOGIC ---
     def setup_designer_tab(self):
-        self.tab_designer.grid_columnconfigure(0, weight=1)
-        self.tab_designer.grid_columnconfigure(1, weight=0)
+        # ------------------ ROOT GRID CONFIG ------------------
+        self.tab_designer.grid_columnconfigure(0, weight=1) # Drawing Area (Left)
+        self.tab_designer.grid_columnconfigure(1, weight=0, minsize=350) # Sidebar (Right)
         self.tab_designer.grid_rowconfigure(0, weight=1)
 
-        container = ctk.CTkFrame(self.tab_designer, fg_color=THEME["surface"], corner_radius=8) # Smaller corner radius
-        container.grid(row=0, column=0, sticky="nsew", padx=8, pady=8) # Reduced container padding
+        # ------------------ LEFT SIDE: DRAWING AREA (Column 0) ------------------
+        container = ctk.CTkFrame(self.tab_designer, fg_color=THEME["surface_2"], corner_radius=10) 
+        container.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
         container.grid_columnconfigure(0, weight=1)
-
-        # Drawing Area (Center)
-        draw_frame = tk.Frame(container, bg=THEME["surface"])
-        draw_frame.grid(row=0, column=0, sticky="nsew", padx=20, pady=20)
+        container.grid_rowconfigure(0, weight=1)
+        
+        # Drawing Area (Center) - Ensures the grid is centered
+        draw_frame = tk.Frame(container, bg=THEME["surface_2"])
+        draw_frame.grid(row=0, column=0, sticky="nsew")
         
         # Centering the grid within the frame
         self.grid_inner = tk.Frame(draw_frame, bg="#2B2B2B")
         self.grid_inner.pack(expand=True, padx=20, pady=20) 
         
-        # Ensure cells are cleared and redrawn on fresh setup, necessary for refresh_grid_ui
+        # Grid initialization (kept mostly the same for functionality)
         self.cells = {}
+        # Assuming GRID_SIZE, UI_COLORS, and relevant commands are defined elsewhere
         for r in range(GRID_SIZE):
             for c in range(GRID_SIZE):
-                cell = tk.Label(self.grid_inner, text=" ", width=6, height=3, # Reduced size for better fit
-                                font=("Courier New", 11, "bold"), bg=UI_COLORS["black"],
+                cell = tk.Label(self.grid_inner, text=" ", width=6, height=3, # Slightly more compact grid
+                                font=("Courier New", 12, "bold"), bg=UI_COLORS["black"],
                                 fg="white", relief="flat", bd=1)
                 cell.grid(row=r, column=c, padx=1, pady=1)
                 
                 cell.bind("<Button-1>", lambda e, row=r, col=c: self.on_cell_down(e, row, col))
                 cell.bind("<B1-Motion>", self.on_cell_drag)
                 cell.bind("<ButtonRelease-1>", self.on_cell_up)
+                
+                # New: Bind hover event for live info display
+                cell.bind("<Enter>", lambda e, row=r, col=c: self.update_cell_info(row, col))
+                cell.bind("<Leave>", lambda e: self.clear_cell_info())
+                
                 self.cells[cell] = (r, c)
         
         self.refresh_grid_ui()
                 
-        # Designer Sidebar (Right)
-        sidebar = ctk.CTkFrame(self.tab_designer, width=320, fg_color=THEME["surface_2"], corner_radius=8) # Moved sidebar definition here for proper padding/container use
-        sidebar.grid(row=0, column=1, sticky="nsew", padx=(0, 8), pady=8)
+        # ------------------ RIGHT SIDE: SIDEBAR (Column 1) ------------------
+        sidebar = ctk.CTkFrame(self.tab_designer, width=350, fg_color=THEME["surface"], corner_radius=10)
+        sidebar.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
         
-        # --- TOOLS ---
-        ctk.CTkLabel(sidebar, text="TOOLS", font=(FONT_FAMILY, 16, "bold")).pack(pady=(12, 4))
-        tool_frame = ctk.CTkFrame(sidebar, fg_color="transparent")
-        tool_frame.pack(fill="x", padx=15, pady=(0, 8))
+        # Use a scrollable frame for the sidebar if tools/actions get too long
+        scroll_sidebar = ctk.CTkScrollableFrame(sidebar, fg_color="transparent")
+        scroll_sidebar.pack(fill="both", expand=True, padx=5, pady=5)
+
+
+        # --- 1. TOOL SELECTION ---
+        self.create_sidebar_heading(scroll_sidebar, "🔧 Drawing Tools")
+        tool_frame = ctk.CTkFrame(scroll_sidebar, fg_color=THEME["surface_2"], corner_radius=8)
+        tool_frame.pack(fill="x", padx=10, pady=(0, 10))
+        tool_frame.grid_columnconfigure(0, weight=1) # Make column 0 expandable
         
         # Standardized radio button layout
-        ctk.CTkRadioButton(tool_frame, text="Paint (Click/Drag)", variable=self.tool_var, value="paint", command=self.sync_tools, font=(FONT_FAMILY, 11)).grid(row=0, column=0, sticky="w", padx=5, pady=2)
-        ctk.CTkRadioButton(tool_frame, text="Text (Sequential Type)", variable=self.tool_var, value="text", command=self.sync_tools, font=(FONT_FAMILY, 11)).grid(row=1, column=0, sticky="w", padx=5, pady=2)
-        ctk.CTkRadioButton(tool_frame, text="Line (Start & End Click)", variable=self.tool_var, value="line", command=self.sync_tools, font=(FONT_FAMILY, 11)).grid(row=2, column=0, sticky="w", padx=5, pady=2)
-        ctk.CTkRadioButton(tool_frame, text="Fill (Bucket)", variable=self.tool_var, value="fill", command=self.sync_tools, font=(FONT_FAMILY, 11)).grid(row=3, column=0, sticky="w", padx=5, pady=2)
-        #ctk.CTkRadioButton(tool_frame, text="Select (Box Drag)", variable=self.tool_var, value="select", command=self.sync_tools, font=(FONT_FAMILY, 11)).grid(row=4, column=0, sticky="w", padx=5, pady=2)
+        ctk.CTkRadioButton(tool_frame, text="Paint (Click/Drag)", variable=self.tool_var, value="paint", command=self.sync_tools, font=(FONT_FAMILY, 11, "bold")).grid(row=0, column=0, sticky="w", padx=15, pady=4)
+        ctk.CTkRadioButton(tool_frame, text="Text (Sequential Type)", variable=self.tool_var, value="text", command=self.sync_tools, font=(FONT_FAMILY, 11, "bold")).grid(row=1, column=0, sticky="w", padx=15, pady=4)
+        ctk.CTkRadioButton(tool_frame, text="Line (Start & End Click)", variable=self.tool_var, value="line", command=self.sync_tools, font=(FONT_FAMILY, 11, "bold")).grid(row=2, column=0, sticky="w", padx=15, pady=4)
+        ctk.CTkRadioButton(tool_frame, text="Fill (Bucket)", variable=self.tool_var, value="fill", command=self.sync_tools, font=(FONT_FAMILY, 11, "bold")).grid(row=3, column=0, sticky="w", padx=15, pady=4)
+        # Selector tool is hidden: ctk.CTkRadioButton(tool_frame, text="Select (Box Drag)", variable=self.tool_var, value="select", command=self.sync_tools, font=(FONT_FAMILY, 11)).grid(row=4, column=0, sticky="w", padx=5, pady=2)
         
-        ctk.CTkFrame(sidebar, height=1, fg_color="gray40").pack(fill="x", padx=15, pady=10)
-
-        # --- PALETTE ---
-        ctk.CTkLabel(sidebar, text="COLOR PALETTE", font=(FONT_FAMILY, 14, "bold")).pack(pady=(0, 5))
-        palette = ctk.CTkFrame(sidebar, fg_color="transparent")
-        palette.pack(pady=5, padx=10)
+        
+        # --- 2. COLOR PALETTE ---
+        self.create_sidebar_heading(scroll_sidebar, "🎨 Color Palette")
+        palette_box = ctk.CTkFrame(scroll_sidebar, fg_color=THEME["surface_2"], corner_radius=8)
+        palette_box.pack(fill="x", padx=10, pady=(0, 10))
+        
+        palette_grid = ctk.CTkFrame(palette_box, fg_color="transparent")
+        palette_grid.pack(pady=10, padx=10)
+        
+        # Dynamic Palette Layout
         row, col = 0, 0
+        max_cols = 5
         for name, hex_val in UI_COLORS.items():
-            ctk.CTkButton(palette, text="", width=30, height=30, fg_color=hex_val, # Standardized palette buttons
-                          hover_color=hex_val, corner_radius=4, command=lambda c=name: self.select_color(c)).grid(row=row, column=col, padx=2, pady=2)
+            ctk.CTkButton(palette_grid, text=" ", width=45, height=45, fg_color=hex_val, 
+                          hover_color=hex_val, corner_radius=6, 
+                          command=lambda c=name: self.select_color(c)).grid(row=row, column=col, padx=4, pady=4)
             col += 1
-            if col > 4: col = 0; row += 1
+            if col >= max_cols: col = 0; row += 1
+        
+        # Selected Color Info
+        self.lbl_selected = ctk.CTkLabel(palette_box, text="Current Color: RED", font=(FONT_FAMILY, 12, "bold"), anchor="center")
+        self.lbl_selected.pack(fill="x", pady=(0, 10))
 
-        self.lbl_selected = ctk.CTkLabel(sidebar, text="Color: RED", font=(FONT_FAMILY, 11, "bold"))
-        self.lbl_selected.pack(pady=4)
-        
-        # --- LIVE INFO ---
-        ctk.CTkFrame(sidebar, height=1, fg_color="gray40").pack(fill="x", padx=15, pady=10)
-        ctk.CTkLabel(sidebar, text="CELL DATA PREVIEW", font=(FONT_FAMILY, 14, "bold")).pack(pady=(0, 4))
-        self.lbl_cell_info = ctk.CTkLabel(sidebar, text="Addr: --\nBIN: --\nDEC: --", justify="left", font=("Consolas", 10))
-        self.lbl_cell_info.pack(fill="x", padx=15, pady=(0, 8))
 
-        # --- GRID ACTIONS ---
-        ctk.CTkFrame(sidebar, height=1, fg_color="gray40").pack(fill="x", padx=15, pady=10)
-        ctk.CTkLabel(sidebar, text="GRID ACTIONS", font=(FONT_FAMILY, 14, "bold")).pack(pady=(0, 5))
+        # --- 3. TRANSFORM & ACTIONS ---
+        self.create_sidebar_heading(scroll_sidebar, "🔄 Grid Transformations")
+        action_frame = ctk.CTkFrame(scroll_sidebar, fg_color=THEME["surface_2"], corner_radius=8)
+        action_frame.pack(fill="x", padx=10, pady=(0, 10))
+        action_frame.grid_columnconfigure((0, 1, 2), weight=1)
         
-        # Selection Tools Frame
-        action_frame = ctk.CTkFrame(sidebar, fg_color="transparent")
-        action_frame.pack(fill="x", padx=15, pady=(0, 5))
+        # Transformation Tools (kept same structure)
+        btn_h = 35
+        ctk.CTkButton(action_frame, text="Flip Horizontal", height=btn_h, **BTN_STYLE_HM, command=lambda: self.transform_grid('flip_h')).grid(row=0, column=0, columnspan=3, padx=10, pady=(10, 5), sticky="ew")
         
-        # Standardized button height/style
-        btn_w = 85
-        #ctk.CTkButton(action_frame, text="Copy", width=btn_w, **BTN_STYLE, command=self.copy_selection).grid(row=0, column=0, padx=2, pady=2)
-        #ctk.CTkButton(action_frame, text="Paste", width=btn_w, **BTN_STYLE, command=self.paste_selection).grid(row=0, column=1, padx=2, pady=2)
-        #ctk.CTkButton(action_frame, text="Cut", width=btn_w, **BTN_STYLE, command=self.cut_selection).grid(row=0, column=2, padx=2, pady=2)
-        
-        # Shift Frame
-        #shift_frame = ctk.CTkFrame(sidebar, fg_color="transparent")
-        #shift_frame.pack(fill="x", padx=15, pady=(5, 10))
-        #ctk.CTkLabel(shift_frame, text="Shift:", font=(FONT_FAMILY, 11)).pack(side="left", padx=(0, 5))
-        
-        #shift_btn_style = {"width": 30, "height": 30, "corner_radius": 4, "font": (FONT_FAMILY, 10, "bold")}
-        #ctk.CTkButton(shift_frame, text="⇦", **shift_btn_style, command=lambda: self.shift_selection(0, -1)).pack(side="left", padx=1)
-        #ctk.CTkButton(shift_frame, text="⇨", **shift_btn_style, command=lambda: self.shift_selection(0, 1)).pack(side="left", padx=1)
-        #ctk.CTkButton(shift_frame, text="⇧", **shift_btn_style, command=lambda: self.shift_selection(-1, 0)).pack(side="left", padx=1)
-        #ctk.CTkButton(shift_frame, text="⇩", **shift_btn_style, command=lambda: self.shift_selection(1, 0)).pack(side="left", padx=1)
+        # New Row for Rotate and Flip V
+        ctk.CTkButton(action_frame, text="Flip Vertical", height=btn_h, **BTN_STYLE_HM, command=lambda: self.transform_grid('flip_v')).grid(row=1, column=0, columnspan=2, padx=(10, 5), pady=5, sticky="ew")
+        ctk.CTkButton(action_frame, text="Rotate ↻", height=btn_h, **BTN_STYLE_HM, command=lambda: self.transform_grid('rotate')).grid(row=1, column=2, padx=(5, 10), pady=5, sticky="ew")
 
-        # Transformation Tools
-        ctk.CTkButton(action_frame, text="Flip H", width=btn_w, **BTN_STYLE, command=lambda: self.transform_grid('flip_h')).grid(row=1, column=0, padx=8, pady=2)
-        ctk.CTkButton(action_frame, text="Flip V", width=btn_w, **BTN_STYLE, command=lambda: self.transform_grid('flip_v')).grid(row=1, column=1, padx=8, pady=2)
-        ctk.CTkButton(action_frame, text="Rotate ↻", width=btn_w, **BTN_STYLE, command=lambda: self.transform_grid('rotate')).grid(row=1, column=2, padx=8, pady=2)
 
-        ctk.CTkButton(sidebar, text="CLEAR GRID", fg_color=THEME["danger"], hover_color="#b91c1c", 
-                      height=40, font=(FONT_FAMILY, 12, "bold"), command=lambda: self.clear_grid(confirm=True)).pack(fill="x", padx=15, pady=(10, 8))
+        # --- 4. DATA PREVIEW ---
+        self.create_sidebar_heading(scroll_sidebar, "📊 Cell Data Preview")
+        preview_frame = ctk.CTkFrame(scroll_sidebar, fg_color=THEME["surface_2"], corner_radius=8)
+        preview_frame.pack(fill="x", padx=10, pady=(0, 10))
         
-        # --- FILE/PROJECT ACTIONS ---
-        ctk.CTkFrame(sidebar, height=1, fg_color="gray40").pack(fill="x", padx=15, pady=10)
-        ctk.CTkLabel(sidebar, text="PROJECT MANAGER", font=(FONT_FAMILY, 14, "bold")).pack(pady=(0, 15))
+        # Live Info Label (Improved readability)
+        self.lbl_cell_info = ctk.CTkLabel(preview_frame, text="Hover over a cell to see data.", justify="left", 
+                                          font=("Consolas", 11), padx=10, anchor="w")
+        self.lbl_cell_info.pack(fill="x", padx=10, pady=10)
         
-        file_frame = ctk.CTkFrame(sidebar, fg_color="transparent")
-        file_frame.pack(fill="x", padx=15, pady=(0, 5))
-        
-        ctk.CTkButton(file_frame, text="LOAD PROJECT", **BTN_STYLE, command=self.load_project).pack(side="left", expand=True, padx=2)
-        ctk.CTkButton(file_frame, text="SAVE PROJECT", **BTN_STYLE, command=self.save_project).pack(side="left", expand=True, padx=2)
-        
-        ctk.CTkLabel(sidebar, text="SAVES", font=(FONT_FAMILY, 14, "bold")).pack(pady=(10, 15))
+        # Clear Grid Button (High visibility, kept the danger color)
+        ctk.CTkButton(preview_frame, text="WIPE ENTIRE GRID", fg_color=THEME["danger"], hover_color="#b91c1c", 
+                      height=40, font=(FONT_FAMILY, 14, "bold"), command=lambda: self.clear_grid(confirm=True)).pack(fill="x", padx=10, pady=(5, 10))
 
-        ctk.CTkButton(sidebar, text="IMPORT .TXT SAVE", **BTN_STYLE, command=self.import_designer_file).pack(fill="x", padx=15, pady=(5, 2))
-        ctk.CTkButton(sidebar, text="EXPORT .TXT SAVE", **BTN_STYLE, command=self.export_designer_file).pack(fill="x", padx=15, pady=2)
+
+        # --- 5. PROJECT & I/O ---
+        self.create_sidebar_heading(scroll_sidebar, "💾 Project I/O")
+        io_frame = ctk.CTkFrame(scroll_sidebar, fg_color=THEME["surface_2"], corner_radius=8)
+        io_frame.pack(fill="x", padx=10, pady=(0, 15))
+        io_frame.grid_columnconfigure((0, 1), weight=1)
+
+        # Load/Save Project (for internal state)
+        ctk.CTkButton(io_frame, text="LOAD PROJECT (.json)", height=35, **BTN_STYLE_HM, command=self.load_project).grid(row=0, column=0, padx=(10, 5), pady=(10, 5), sticky="ew")
+        ctk.CTkButton(io_frame, text="SAVE PROJECT (.json)", height=35, **BTN_STYLE_HM, command=self.save_project).grid(row=0, column=1, padx=(5, 10), pady=(10, 5), sticky="ew")
         
-        # --- INTEGRATION ---
+        # Import/Export .TXT (for encoder compatibility)
+        ctk.CTkButton(io_frame, text="IMPORT TXT (File)", height=35, **BTN_STYLE_HM, command=self.import_designer_file).grid(row=1, column=0, padx=(10, 5), pady=(5, 5), sticky="ew")
+        ctk.CTkButton(io_frame, text="EXPORT TXT (File)", height=35, **BTN_STYLE_HM, command=self.export_designer_file).grid(row=1, column=1, padx=(5, 10), pady=(5, 5), sticky="ew")
+
+
+        # --- 6. ENCODER INTEGRATION ---
+        self.create_sidebar_heading(scroll_sidebar, "🔗 Integration")
         ctk.CTkButton(
-            sidebar,
-            text="SEND TO ENCODER",
+            scroll_sidebar,
+            text="SEND DESIGN TO ENCODER",
             fg_color=THEME["success"],
-            hover_color="#15803d",
-            height=45,
-            font=(FONT_FAMILY, 13, "bold"),
+            hover_color=THEME["success_hover"],
+            height=50,
+            font=(FONT_FAMILY, 15, "bold"),
             command=self.send_to_encoder,
-        ).pack(fill="x", padx=15, pady=(15, 12))
+        ).pack(fill="x", padx=15, pady=(5, 15))
 
+    def update_cell_info(self, row, col):
+        # Assuming you have a design_grid_data structure holding the raw color values (0-7, or hex/name)
+        # Assuming your UI_COLORS dictionary maps names to hex, and you have a reverse map to binary.
+        
+        # Calculate Address: 4-bit Location (0) + 8-bit Pixel (r*N + c)
+        pixel_address = (row * GRID_SIZE) + col 
+        
+        # The 16-bit EEPROM address (Location 0, Pixel X)
+        eeprom_address = pixel_address # Simplification: Assuming Location 0
+        
+        # Fetch the data stored in the pixel (You must implement how data is stored, e.g., self.pixel_data[row][col])
+        # Example data structure: (RGB1_Value, RGB2_Value, Character_Value)
+        # For simplicity, let's assume you fetch the stored color name or RGB value.
+        
+        # Placeholder for actual data retrieval
+        # pixel_color_name = self.pixel_data[row][col].color_name
+        # pixel_combined_val = self.get_combined_value(row, col) # A function to get the final 16-bit value
+        
+        # For demonstration, use address and row/col info:
+        info_text = (
+            f"Address: 0x00{eeprom_address:02X} (L0:P{pixel_address})\n"
+            f"Pixel: ({row}, {col})\n"
+            f"DEC Value: 0\n" # Replace 0 with the actual DEC value
+            f"BIN Value: 000 000 000 0000000" # Replace with actual 16-bit binary
+        )
+        self.lbl_cell_info.configure(text=info_text)
+
+    def clear_cell_info(self):
+        self.lbl_cell_info.configure(text="Hover over a cell to see data.")
+
+    # --- ADD THIS METHOD TO YOUR CLASS (If missing) ---
+    def create_sidebar_heading(self, parent, text):
+        # FIX: Remove pady from the CTkLabel constructor and place it in .pack()
+        ctk.CTkLabel(parent, text=text, font=(FONT_FAMILY, 16, "bold"), padx=10, anchor="w").pack(fill="x", padx=5, pady=(15, 5))
+        ctk.CTkFrame(parent, height=1, fg_color="gray40").pack(fill="x", padx=15, pady=5)
 
     def sync_tools(self):
         self.current_tool = self.tool_var.get()
@@ -817,62 +899,129 @@ class CombinedEEPROMApp(ctk.CTk):
 
     # --- ENCODER LOGIC ---
     def setup_encoder_tab(self):
-        self.tab_encoder.grid_columnconfigure(0, weight=1)
-        self.tab_encoder.grid_columnconfigure(1, weight=1)
+        
+        # ------------------ ROOT GRID CONFIG ------------------
+        self.tab_encoder.grid_columnconfigure(0, weight=1, minsize=350) # File Manager
+        self.tab_encoder.grid_columnconfigure(1, weight=1, minsize=450) # Settings & Console
         self.tab_encoder.grid_rowconfigure(0, weight=1)
 
-        # Left: File Manager (Column 0)
-        left = ctk.CTkFrame(self.tab_encoder)
-        left.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
+        # ------------------ LEFT SIDE: FILE MANAGER (Column 0) ------------------
+        left = ctk.CTkFrame(self.tab_encoder, corner_radius=10, fg_color=THEME["surface_2"])
+        left.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
         left.grid_rowconfigure(1, weight=1)
         left.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(left, text="Active Files (File 0 is first)", font=(FONT_FAMILY, 16, "bold")).grid(row=0, column=0, columnspan=2, pady=8)
-        self.file_listbox = tk.Listbox(left, bg="#2b2b2b", fg="white", borderwidth=0, highlightthickness=0, font=("Consolas", 11), selectmode=tk.SINGLE)
-        self.file_listbox.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=10, pady=(0, 10))
+        # Title
+        ctk.CTkLabel(left, text="📂 File Order & Management", font=(FONT_FAMILY, 18, "bold")).grid(row=0, column=0, sticky="w", padx=15, pady=10)
 
-        # Add/Remove buttons
+        # Listbox
+        self.file_listbox = tk.Listbox(left, bg=THEME["surface"], fg="white", borderwidth=0, 
+                                   highlightthickness=0, font=("Consolas", 11), selectmode=tk.SINGLE,
+                                   relief="flat", bd=0)
+        self.file_listbox.grid(row=1, column=0, sticky="nsew", padx=15, pady=(0, 10))
+
+        # --- File Add/Remove Buttons ---
         btn_f = ctk.CTkFrame(left, fg_color="transparent")
-        btn_f.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 5))
-        ctk.CTkButton(btn_f, text="+ Add File", **BTN_STYLE, command=self.add_encoder_file).pack(side="left", expand=True, fill="x", padx=2)
-        ctk.CTkButton(btn_f, text="- Remove", fg_color="#c0392b", **Legacy_BTN_STYLE, command=self.remove_encoder_file).pack(side="left", expand=True, fill="x", padx=2)
+        btn_f.grid(row=2, column=0, sticky="ew", padx=15, pady=(0, 5))
+        btn_f.grid_columnconfigure((0, 1), weight=1)
 
-        # Reordering buttons
+        ctk.CTkButton(btn_f, text="+ Add File", **BTN_STYLE, command=self.add_encoder_file).grid(row=0, column=0, sticky="ew", padx=(0, 5))
+        ctk.CTkButton(btn_f, text="- Remove", fg_color=THEME["error"], hover_color=THEME["error_hover"], 
+                      **Legacy_BTN_STYLE, command=self.remove_encoder_file).grid(row=0, column=1, sticky="ew", padx=(5, 0))
+
+        # --- Reordering Buttons ---
         reorder_f = ctk.CTkFrame(left, fg_color="transparent")
-        reorder_f.grid(row=3, column=0, sticky="ew", padx=10, pady=(5, 10))
-        ctk.CTkButton(reorder_f, text="Move Up ⇧", **BTN_STYLE, command=self.move_file_up).pack(side="left", expand=True, fill="x", padx=2)
-        ctk.CTkButton(reorder_f, text="Move Down ⇩", **BTN_STYLE, command=self.move_file_down).pack(side="left", expand=True, fill="x", padx=2)
-        
-        # Right: Output (Column 1)
-        right = ctk.CTkFrame(self.tab_encoder)
-        right.grid(row=0, column=1, sticky="nsew", padx=8, pady=8)
-        right.grid_rowconfigure(5, weight=1)
+        reorder_f.grid(row=3, column=0, sticky="ew", padx=15, pady=(5, 15))
+        reorder_f.grid_columnconfigure((0, 1), weight=1)
+
+        ctk.CTkButton(reorder_f, text="Move Up ⇧", **BTN_STYLE, command=self.move_file_up).grid(row=0, column=0, sticky="ew", padx=(0, 5))
+        ctk.CTkButton(reorder_f, text="Move Down ⇩", **BTN_STYLE, command=self.move_file_down).grid(row=0, column=1, sticky="ew", padx=(5, 0))
+
+        # --- Virtual File Management ---
+        ctk.CTkButton(left, text="💾 SAVE VIRTUAL FILES AS .TXT", 
+                      fg_color=THEME["info"], hover_color=THEME["info_hover"],
+                      **BTN_STYLE, command=self.save_virtual_files).grid(row=4, column=0, sticky="ew", padx=15, pady=(0, 15))
+
+
+        # ------------------ RIGHT SIDE: SETTINGS & CONSOLE (Column 1) ------------------
+        right = ctk.CTkFrame(self.tab_encoder, corner_radius=10, fg_color=THEME["surface_2"])
+        right.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+        # We need to increase the weight of the console row, which will now be row 6
+        right.grid_rowconfigure(6, weight=1)
         right.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(right, text="Compiler Settings", font=(FONT_FAMILY, 16, "bold")).grid(row=0, column=0, pady=8)
-        settings_box = ctk.CTkFrame(right, fg_color="#2b2b2b", corner_radius=6)
-        settings_box.grid(row=1, column=0, sticky="ew", padx=10)
+        # Title
+        ctk.CTkLabel(right, text="⚙️ Compiler Options & Output", font=(FONT_FAMILY, 18, "bold")).grid(row=0, column=0, sticky="w", padx=15, pady=10)
 
-        ctk.CTkSwitch(settings_box, text="16-bit Mode (Unchecked is 8-bit)", variable=self.is_16bit, font=(FONT_FAMILY, 11)).pack(pady=10, padx=10, anchor="w")
+        # --- Group 1: Core Settings (Row 1) ---
+        settings_box = ctk.CTkFrame(right, fg_color=THEME["surface"], corner_radius=8)
+        settings_box.grid(row=1, column=0, sticky="ew", padx=15, pady=(0, 10))
+
+        # 16-bit Mode
+        ctk.CTkSwitch(settings_box, text="16-bit Data Mode (Unchecked is 8-bit)", variable=self.is_16bit, font=(FONT_FAMILY, 11, "bold")).pack(pady=(10, 5), padx=15, anchor="w")
+
+        # NEW FEATURE: Data Integrity Checkbox
+        self.check_integrity = ctk.BooleanVar(value=True)
+        ctk.CTkSwitch(settings_box, text="High Integrity Check (Disable for speed)", variable=self.check_integrity, 
+                      font=(FONT_FAMILY, 11), onvalue=True, offvalue=False).pack(pady=(5, 10), padx=15, anchor="w")
+
         
-        # Boot index group
-        boot_f = ctk.CTkFrame(settings_box, fg_color="transparent")
-        boot_f.pack(pady=(0, 10), padx=10, fill="x")
-        ctk.CTkLabel(boot_f, text="Boot Index (Not used in current output)", anchor="w", font=(FONT_FAMILY, 10)).pack(fill="x", pady=(0, 2))
-        self.opt_boot = ctk.CTkOptionMenu(boot_f, variable=self.boot_index, values=["0"], font=(FONT_FAMILY, 11), height=30)
+        # --- Group 1.5: EEPROM Usage Dashboard (NEW - Row 2) ---
+        usage_box = ctk.CTkFrame(right, fg_color=THEME["surface"], corner_radius=8)
+        usage_box.grid(row=2, column=0, sticky="ew", padx=15, pady=(0, 10))
+        
+        ctk.CTkLabel(usage_box, text="📊 EEPROM Usage Dashboard", font=(FONT_FAMILY, 14, "bold"), anchor="w").pack(fill="x", padx=15, pady=(8, 4))
+        
+        # 1. Total Usage Progress Bar
+        self.lbl_total_usage = ctk.CTkLabel(usage_box, text="Total Memory Used: 0 / 4096 Addresses (0.0%)", font=(FONT_FAMILY, 11), anchor="w")
+        self.lbl_total_usage.pack(fill="x", padx=15, pady=(0, 2))
+        
+        self.progress_total = ctk.CTkProgressBar(usage_box, height=10, corner_radius=5, fg_color="#333333", progress_color="#3498db")
+        self.progress_total.set(0.0)
+        self.progress_total.pack(fill="x", padx=15, pady=(0, 8))
+        
+        # 2. File Saturation Details (Scrollable List)
+        ctk.CTkLabel(usage_box, text="File Saturation (Max 256 addresses per file):", font=(FONT_FAMILY, 11, "bold"), anchor="w").pack(fill="x", padx=15, pady=(4, 2))
+        
+        self.file_usage_scroll = ctk.CTkScrollableFrame(usage_box, height=100, fg_color="#2b2b2b", corner_radius=6)
+        self.file_usage_scroll.pack(fill="x", padx=15, pady=(0, 10))
+        
+        # Placeholder Label - This will be replaced by dynamic labels in run_encoder
+        self.lbl_file_usage_placeholder = ctk.CTkLabel(self.file_usage_scroll, text="Run compiler to calculate usage...", font=(FONT_FAMILY, 10), text_color="#aaaaaa")
+        self.lbl_file_usage_placeholder.pack(padx=10, pady=5)
+
+        
+        # --- Group 2: Boot & Output Settings (Row 3 - BUMPED) ---
+        boot_output_box = ctk.CTkFrame(right, fg_color=THEME["surface"], corner_radius=8)
+        boot_output_box.grid(row=3, column=0, sticky="ew", padx=15, pady=(0, 10)) # OLD ROW 2
+        
+        # Boot Index
+        boot_f = ctk.CTkFrame(boot_output_box, fg_color="transparent")
+        boot_f.pack(pady=10, padx=10, fill="x")
+        ctk.CTkLabel(boot_f, text="Boot File Index (0-15)", anchor="w", font=(FONT_FAMILY, 12, "bold")).pack(fill="x", pady=(0, 2))
+        self.opt_boot = ctk.CTkOptionMenu(boot_f, variable=self.boot_index, values=["0"], font=(FONT_FAMILY, 11), height=35)
         self.opt_boot.pack(fill="x")
+
+        # NEW FEATURE: Output Type Selection
+        self.output_mode = ctk.StringVar(value="Clipboard")
+        ctk.CTkLabel(boot_output_box, text="Output Destination", anchor="w", font=(FONT_FAMILY, 12, "bold")).pack(fill="x", padx=10, pady=(5, 2))
+        ctk.CTkSegmentedButton(boot_output_box, variable=self.output_mode, 
+                               values=["Clipboard", "Save File (.dat)"], font=(FONT_FAMILY, 11), height=35).pack(fill="x", padx=10, pady=(0, 10))
+
+
+        # --- Compile Button (Row 4 - BUMPED) ---
+        ctk.CTkButton(right, text="🚀 COMPILE & EXPORT", font=(FONT_FAMILY, 16, "bold"), 
+                      fg_color=THEME["success"], hover_color=THEME["success_hover"], 
+                      command=self.run_encoder, height=50).grid(row=4, column=0, sticky="ew", padx=15, pady=(10, 20)) # OLD ROW 3
+
+        # --- Console Output (Row 5 - BUMPED) ---
+        ctk.CTkLabel(right, text="🖥️ Console Log", font=(FONT_FAMILY, 14, "bold")).grid(row=5, column=0, sticky="w", padx=15, pady=(0, 5)) # OLD ROW 4
         
-        # Save Virtual Files Button
-        ctk.CTkButton(right, text="SAVE VIRTUAL FILES AS .TXT", **BTN_STYLE, command=self.save_virtual_files).grid(row=2, column=0, sticky="ew", padx=10, pady=(5, 10))
-
-        ctk.CTkButton(right, text="COMPILE TO CLIPBOARD", font=(FONT_FAMILY, 14, "bold"), 
-                      fg_color="#27ae60", hover_color="#219150", command=self.run_encoder).grid(row=3, column=0, sticky="ew", padx=10, pady=(10, 20))
-
-        ctk.CTkLabel(right, text="Console Output", font=(FONT_FAMILY, 12, "bold")).grid(row=4, column=0, sticky="w", padx=10, pady=(0, 5))
-        self.console = ctk.CTkTextbox(right, font=("Consolas", 10))
-        self.console.grid(row=5, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        # Console Textbox (Row 6 - BUMPED)
+        self.console = ctk.CTkTextbox(right, font=("Consolas", 10), corner_radius=8, fg_color=THEME["surface"])
+        self.console.grid(row=6, column=0, sticky="nsew", padx=15, pady=(0, 15)) # OLD ROW 5
         self.console.configure(state="disabled")
-
+    
     def log(self, message, type="info"):
         self.console.configure(state="normal")
         prefix = "[ERROR] " if type=="error" else "[WARN]  " if type=="warn" else "[INFO]  "
@@ -883,22 +1032,66 @@ class CombinedEEPROMApp(ctk.CTk):
     def add_encoder_file(self):
         fps = filedialog.askopenfilenames(filetypes=[("Text Files", "*.txt")])
         for p in fps:
-            if p not in self.files_to_encode:
+            # Check if file path is already tracked
+           if p not in self.files_to_encode:
+                # 1. Add the full path to the internal list (most important)
                 self.files_to_encode.append(p)
-                self.file_listbox.insert("end", os.path.basename(p))
+
+                # 2. Prepare the display string: Name (Full Path)
+                short_name = os.path.basename(p)
+                # Use os.path.normpath to clean up path separators
+                display_path = os.path.normpath(p) 
+            
+                # 3. Insert the formatted string into the Listbox
+                # We add the index number in the listbox for clarity
+                listbox_index = len(self.file_listbox.get(0, "end"))
+            
+                # Formatting the output string (using tabs or spaces for alignment)
+                formatted_entry = f"📄 ({listbox_index}) Name: {short_name:<25} (Source: {display_path})" 
+            
+                self.file_listbox.insert("end", formatted_entry)
+            
+                self.log(f"Added file: {short_name} at index {listbox_index}.", "info")
+            
         self.update_boot_options()
 
     def remove_encoder_file(self):
         sel = self.file_listbox.curselection()
-        if sel:
-            idx = sel[0]
-            name = self.files_to_encode[idx]
+        if not sel: return
+        
+        idx = sel[0]
+        
+        # 1. Handle Virtual File Cleanup
+        name = self.files_to_encode[idx]
+        if name.startswith("Virtual_Design_") and name in self.virtual_files: 
+            del self.virtual_files[name]
+        
+        # 2. Remove the file path and listbox entry
+        self.files_to_encode.pop(idx)
+        self.file_listbox.delete(idx)
+        
+        self.log(f"Removed file at index {idx}.", "warn")
+        
+        # 3. Re-index and refresh the subsequent entries in the listbox (Crucial for visual consistency)
+        self._refresh_listbox_indices(idx)
+
+        self.update_boot_options()
+
+    def _refresh_listbox_indices(self, start_idx=0):
+        """
+        Helper method to re-insert the [Index] prefix after a move or removal.
+        """
+        for i in range(start_idx, len(self.files_to_encode)):
+            # The full path is always stored in self.files_to_encode
+            p = self.files_to_encode[i]
+            short_name = os.path.basename(p)
+            display_path = os.path.normpath(p)
             
-            if name.startswith("Virtual_Design_") and name in self.virtual_files: del self.virtual_files[name]
-                
-            self.file_listbox.delete(idx)
-            self.files_to_encode.pop(idx)
-            self.update_boot_options()
+            formatted_entry = f"📄 ({i}) Name: {short_name:<25} (Source: {display_path})"
+            
+            # Delete the old entry and insert the new, correctly indexed entry
+            self.file_listbox.delete(i)
+            self.file_listbox.insert(i, formatted_entry)
 
     # --- FEATURE: Encoder File Reordering ---
     def move_file(self, direction):
@@ -908,11 +1101,18 @@ class CombinedEEPROMApp(ctk.CTk):
         new_idx = idx + direction
         
         if 0 <= new_idx < len(self.files_to_encode):
+            
+            # 1. Swap the paths in the internal list
             self.files_to_encode[idx], self.files_to_encode[new_idx] = self.files_to_encode[new_idx], self.files_to_encode[idx]
             
-            temp_name = self.file_listbox.get(idx)
+            # 2. Swap the display strings in the Listbox and fix indexing
             self.file_listbox.delete(idx)
-            self.file_listbox.insert(new_idx, temp_name)
+            self.file_listbox.delete(new_idx - 1 if new_idx > idx else new_idx) # Delete the other item after the first delete shifts indices
+            
+            # Use the helper function to re-insert the items with correct new indices
+            self._refresh_listbox_indices(min(idx, new_idx))
+            
+            # 3. Re-select the moved item
             self.file_listbox.selection_set(new_idx)
             
             self.update_boot_options()
@@ -941,100 +1141,236 @@ class CombinedEEPROMApp(ctk.CTk):
 
         self.log(f"Saved {len(self.virtual_files)} virtual files to {target_dir}.", "warn")
         
+    def update_usage_dashboard(self, total_written, file_counts):
+        # Constants
+        TOTAL_MAX = 4096 # 16 Locations * 256 Pixels
+        FILE_MAX = 256   # Max pixels per file/location
+        
+        # --- Update Total Usage ---
+        percentage = total_written / TOTAL_MAX if TOTAL_MAX > 0 else 0
+        self.progress_total.set(percentage)
+        self.lbl_total_usage.configure(text=f"Total Memory Used: {total_written} / {TOTAL_MAX} Addresses ({percentage*100:.1f}%)")
+        
+        # --- Clear and Update File Usage Details ---
+        
+        # Remove old placeholder/labels in the scrollable frame
+        for widget in self.file_usage_scroll.winfo_children():
+            widget.destroy()
+            
+        # Add new labels for each file
+        if not file_counts:
+             ctk.CTkLabel(self.file_usage_scroll, text="No files encoded.", font=(FONT_FAMILY, 10), text_color="#aaaaaa").pack(padx=10, pady=5)
+             return
+             
+        for i, count in enumerate(file_counts):
+            file_name = os.path.basename(self.files_to_encode[i])
+            file_percentage = count / FILE_MAX
+            
+            # Use red/warning color if the file is over 80% full
+            color = "#27ae60" # Green
+            #if file_percentage >= 0.8:
+            #    color = "#f39c12" # Orange
+            #if file_percentage == 1.0:
+            #    color = "#c0392b" # Red (Full)
+
+            # File usage line (e.g., "File 0 (Boot): 256/256 (100.0%)")
+            file_text = f"File {i} ({file_name}): {count} / {FILE_MAX} ({file_percentage*100:.1f}%)"
+            
+            lbl = ctk.CTkLabel(self.file_usage_scroll, text=file_text, font=(FONT_FAMILY, 10, "bold"), text_color=color, anchor="w")
+            lbl.pack(fill="x", padx=10, pady=1)
+
+            # Optional: Add a small progress bar for the file usage in the scrollable frame
+            progress = ctk.CTkProgressBar(self.file_usage_scroll, height=5, corner_radius=3, fg_color="#333333", progress_color=color)
+            progress.set(file_percentage)
+            progress.pack(fill="x", padx=10, pady=(0, 4))
+
     def update_boot_options(self):
         options = [f"File {i}: {os.path.basename(p)}" for i, p in enumerate(self.files_to_encode)] if self.files_to_encode else ["0"]
         self.opt_boot.configure(values=options)
         if self.boot_index.get() not in options and options: self.boot_index.set(options[0])
 
+    # --- Encoder Logic ---
+    
+    def get_boot_file_index(self):
+        # Extract index from the dropdown string "File 0: name.txt" -> 0
+        selected_str = self.boot_index.get()
+        if "File " in selected_str:
+            try:
+                return int(selected_str.split(":")[0].replace("File ", ""))
+            except ValueError:
+                return 0 # Should not happen
+        return 0
+
     def run_encoder(self):
         self.console.configure(state="normal")
         self.console.delete("1.0", "end")
         self.console.configure(state="disabled")
-    
+        
         if not self.files_to_encode:
-            return self.log("No files selected!", "error")
+            self.log("No files selected!", "error")
+            return
+        if not self.binary_chars:
+            self.log("BinaryChars.json not loaded. Cannot encode.", "error")
+            return
+
+        # Check file count limit (4-bit Location field limit)
+        num_files = len(self.files_to_encode)
+        if num_files > 16:
+            self.log(f"FATAL ERROR: Maximum number of save files is 16 (0-15), but {num_files} were selected.", "error")
+            return
 
         try:
-            type16 = self.is_16bit.get()
-            out = "#dHCAgA/" if type16 else "XDCAgA/"
+            # 1. Setup & Helper Functions
+            type16 = self.is_16bit.get() # Should be True (16-bit data word)
+            header = "#dHCAgA/" if type16 else "XDCAgA/"
+            output_string = header
             digits = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!@$%?&<()"
+            total_addresses_written = 0
+            file_addresses_written = []
+            
+            # Helper functions remain the same: flip_byte, base71, calc_val
 
             def flip_byte(n):
+                # Flips 16 bits if type16 is True
                 fmt = "{:016b}" if type16 else "{:08b}"
                 return int(fmt.format(n)[::-1], 2)
 
             def base71(n):
-                if n == 0:
-                    return "00" + ("0" if type16 else "")
-                s = ""
+                # Encodes 16-bit word into 3 base71 chars
+                if n == 0: return "00" + ("0" if type16 else "")
+                out = ""
                 while n > 0:
                     n, r = divmod(n, 71)
-                    s = digits[r] + s
-                # The length is 2 (8-bit) or 3 (16-bit). Base 71 encodes two 8-bit bytes 
-                # or one 16-bit word, which should result in 2 or 3 chars respectively
-                return s.rjust(2 + type16, "0")
+                    out = digits[r] + out
+                return out.rjust(2 + type16, "0")
 
             def calc_val(token):
+                # ... (calc_val logic from previous response) ...
                 token = token.strip()
                 if not token: return 0
                 if all(c in "01" for c in token) and len(token) > 2: return int(token, 2)
                 if token.isdigit(): return int(token)
                 if token.lower().startswith("h"): return int(token[1:], 16)
-                if len(token) == 1 and token in self.binary_chars: 
-                    # Convert the 7-bit binary string to an integer
-                    return int(self.binary_chars[token], 2)
+                if len(token) == 1 and token in self.binary_chars: return int(self.binary_chars[token], 2)
                 if "+" in token:
                     total = 0
                     for part in token.split("+"):
-                        p = part.strip()
-                        if not p: continue
-                        if p.lower().startswith("b"): total += (1 << (int(p[1:]) - 1))
-                        else: total += calc_val(p)
+                        part = part.strip()
+                        if not part: continue
+                        if part.lower().startswith("b"): total += (1 << (int(part[1:]) - 1))
+                        else: total += calc_val(part)
                     return total
                 raise ValueError(f"Unknown token: {token}")
 
-            address = 0
-            for i, item in enumerate(self.files_to_encode):
+            
+            # 2. Sequential File Encoding
+            
+            # We don't need a single global address counter. We iterate through files
+            # (Location 0 to 15) and for each file, we use the local pixel address (0 to 255).
+            
+            # This will store the final EEPROM address before flipping/encoding
+            eeprom_address = 0 
+            
+            # 3. Encode File Data
+            
+            for file_index, filepath_or_name in enumerate(self.files_to_encode):
                 
-                is_virtual = item.startswith("Virtual_Design_") or item in self.virtual_files
+                # The file_index is the 4-bit Location field
+                location_bits = file_index 
+
+                is_virtual = filepath_or_name in self.virtual_files
+                filename = os.path.basename(filepath_or_name) if not is_virtual else filepath_or_name
+                self.log(f"Encoding File {file_index} (Location {location_bits}) : {filename}...", "info")
                 
-                self.log(f"Processing: {os.path.basename(item) if not is_virtual else item}...", "info")
-                
-                lines = []
-                if is_virtual and item in self.virtual_files:
-                    lines = self.virtual_files[item].splitlines()
-                elif os.path.exists(item):
-                    with open(item, "r") as f: # Use 'r' only for standard text files
-                        lines = f.read().splitlines()
+                if is_virtual:
+                    lines = self.virtual_files[filepath_or_name].splitlines()
                 else:
-                    self.log(f"File not found or virtual content missing: {item}. Skipping.", "error")
-                    continue
+                    try:
+                        with open(filepath_or_name, "r", encoding="utf-8") as f:
+                            lines = f.read().splitlines()
+                    except FileNotFoundError:
+                        self.log(f"File not found: {filename}. Skipping.", "error")
+                        continue
                 
-                for line in lines:
-                    if address > 255: # Stop after address 255 (the last pixel)
-                        self.log(f"File {i} finished/truncated after 256 addresses.", "warn")
-                        break
+                local_pixel_address = 0 
+                current_file_address_count = 0 # NEW: Counter for the current file
+                
+                max_val = (1 << 16) - 1 # 16-bit max value (65535)
+
+                for line_num, line in enumerate(lines):
                     
-                    line = line.strip()
-                    if not line or line.startswith(("#", "//")):
-                        val = 0
-                    else:
-                        max_val = 65535 if type16 else 255
-                        # If the line is 13 bits (our custom format), parse it directly
-                        if len(line) == 13 and all(c in "01" for c in line):
-                             val = int(line, 2)
-                        else: # Assume it's a raw integer/hex/token expression
-                            val = min(calc_val(line.split("//")[0]), max_val)
+                    # --- Local Address Check ---
+                    if local_pixel_address > 255:
+                        self.log(f"WARN: File {file_index} ({filename}) truncated after 256 addresses (Pixel 0xFF).", "warn")
+                        break # Stop processing this file's lines
+
+                    clean_line = line.split("//")[0].strip()
+                    if not clean_line or clean_line.startswith("#"): 
+                        continue # Skip empty/comment lines
+
+                    try:
+                        val = calc_val(clean_line)
+                        if val > max_val:
+                            self.log(f"Line {line_num+1}: Value {val} too high for 16-bit EEPROM word.", "error")
+                            return
+
+                        # Construct the 16-bit EEPROM address:
+                        eeprom_address = (location_bits << 8) | local_pixel_address
+
+                        # Write the encoded data
+                        output_string += base71(flip_byte(eeprom_address)) # Address word
+                        output_string += base71(flip_byte(val))            # Data word
                         
-                    out += base71(flip_byte(address)) + base71(flip_byte(val))
-                    address += 1
+                        local_pixel_address += 1
 
+                        # NEW: Increment file and total counters
+                        if val != 0:
+                            current_file_address_count += 1
+                            total_addresses_written += 1
+
+                    except Exception as e:
+                        self.log(f"Error in {filename} line {line_num+1} ({clean_line}): {e}", "error")
+                        return
+
+            file_addresses_written.append(current_file_address_count)
+
+            # --- 4. Write Header to High Addresses (0xFFFC to 0xFFFF) ---
+            self.update_usage_dashboard(total_addresses_written, file_addresses_written)
+            header_start_addr = (15 << 8) | 252 # Location 15 (0xF), Pixel 252 (0xFC) = 0xFFFC
+            current_addr = header_start_addr
+            
+            self.log(f"Writing system header to high addresses (0x{header_start_addr:04X} to 0xFFFF)...", "info")
+
+            # Address 0xFFFC: Number of Files
+            output_string += base71(flip_byte(current_addr)) + base71(flip_byte(num_files))
+            current_addr += 1
+
+            # Address 0xFFFD: Boot File Index
+            boot_index_val = self.get_boot_file_index()
+            output_string += base71(flip_byte(current_addr)) + base71(flip_byte(boot_index_val))
+            current_addr += 1
+
+            # Address 0xFFFE, 0xFFFF: Reserved/Unused (Set to 0)
+            output_string += base71(flip_byte(current_addr)) + base71(flip_byte(0))
+            current_addr += 1
+            output_string += base71(flip_byte(current_addr)) + base71(flip_byte(0))
+            # current_addr is now 0x10000, outside the 16-bit range.
+
+            # --- 5. FINAL MARKER AND COPY ---
+            
+            # Add the final end marker
+            output_string += "=1"
+
+            # Copy the entire encoded string to the clipboard
             self.clipboard_clear()
-            self.clipboard_append(out)
-            self.log("SUCCESS! Encoded string copied to clipboard.", "warn")
-
+            self.clipboard_append(output_string)
+            self.log("--------------------------------")
+            self.log(f"SUCCESS! Output copied to clipboard.", "warn")
+            self.log(f"Encoded {num_files} files. Final Header Address: 0xFFFF.", "warn")
+            
         except Exception as e:
-            self.log(f"Error: {e}", "error")
+            self.log(f"Critical Error: {e}", "error")
+            messagebox.showerror("Encoding Error", f"A critical error occurred during encoding: {e}")
 
     # --- FEATURE: Character Map Editor ---
     def setup_charmap_tab(self):
