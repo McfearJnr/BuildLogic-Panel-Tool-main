@@ -1,8 +1,10 @@
 import customtkinter as ctk
+#macos scaling (affect on windows not yet tested [!])
 ctk.set_widget_scaling(0.7)
 ctk.set_window_scaling(0.7)
 import tkinter as tk
 
+#macos scaling (affect on windows not yet tested [!])
 root = tk.Tk()
 root.tk.call("tk", "scaling", 0.75)
 root.destroy()
