@@ -1,4 +1,5 @@
 import customtkinter as ctk
+from PIL import Image, ImageTk
 #macos scaling (affect on windows not yet tested [!])
 ctk.set_widget_scaling(0.7)
 ctk.set_window_scaling(0.7)
@@ -110,6 +111,20 @@ class CombinedEEPROMApp(ctk.CTk):
 
         self.configure(fg_color=THEME["bg"])
         self.title("BuildLogic Panel Studio Pro")
+        try:
+            # Load the PNG image using Pillow
+            icon_image = ImageTk.PhotoImage(Image.open("icon.png")) 
+            
+            # Set the icon for the window (macOS preferred method)
+            # The 'True' flag makes this the icon for all windows
+            self.iconphoto(True, icon_image) 
+            
+        except FileNotFoundError:
+            print("Warning: icon.png not found. Window will use default icon.")
+        except Exception as e:
+            # Fallback for Windows or other errors (not strictly needed on Mac)
+            self.iconbitmap("icon.ico") 
+            print(f"Icon loading error: {e}")
         self.minsize(1800, 1200) 
         
         # --- Resources ---
@@ -205,7 +220,7 @@ class CombinedEEPROMApp(ctk.CTk):
         draw_frame.grid(row=0, column=0, sticky="nsew")
         
         # Centering the grid within the frame
-        self.grid_inner = tk.Frame(draw_frame, bg="#2B2B2B")
+        self.grid_inner = tk.Frame(draw_frame, bg="#202020")
         self.grid_inner.pack(expand=True, padx=20, pady=20) 
         
         # Grid initialization (kept mostly the same for functionality)
