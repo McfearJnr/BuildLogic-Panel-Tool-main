@@ -4,11 +4,25 @@ from PIL import Image, ImageTk
 ctk.set_widget_scaling(1)
 ctk.set_window_scaling(1)
 import tkinter as tk
-
 from tkinter import filedialog, messagebox
 import json
 import os
 import sys
+import requests
+import zipfile
+import shutil
+import subprocess
+
+#Update Constants
+GITHUB_USER = "McfearJnr"      # <-- REPLACE THIS
+GITHUB_REPO = "BuildLogic-Panel-Tool-main"      # <-- REPLACE THIS
+CURRENT_VERSION = "1.4.9"               # <-- REPLACE THIS (Must be manually updated for each release)
+UPDATE_CHECK_URL = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
+DOWNLOAD_URL_BASE = f"https://github.com/{GITHUB_USER}/{GITHUB_REPO}/releases/download/"
+
+MAIN_EXE_NAME = "BuildLogic Panel Suite.exe" 
+TEMP_NEW_EXE_NAME = "LatestBuild.exe" 
+HELPER_SCRIPT_NAME = "updater_helper.py"
 
 # --- Utility Functions ---
 
@@ -38,6 +52,26 @@ except Exception:
 
 # Ensure your constants use the finalized FONT_FAMILY
 
+PALETTE = {
+    # Backgrounds
+    "BG_MAIN": "#21252B", # Deep, soft background for the entire window
+    "BG_SECONDARY": "#282C34", # Slightly lighter background for frames/panels
+    "BG_TERTIARY": "#3C4048", # Even lighter for text entry fields or hover
+    
+    # Accent/Primary Color (e.g., a technical blue)
+    "ACCENT": "#61AFEF", 
+    "ACCENT_DARK": "#569AC8",
+    
+    # Text and Information
+    "TEXT_NORMAL": "#ABB2BF", # Soft white/grey for main text
+    "TEXT_BRIGHT": "#FFFFFF", # Pure white for headers
+    "TEXT_ERROR": "#E06C75", # Red for error messages
+    "TEXT_WARN": "#E5C07B", # Yellow for warnings
+    
+    # Grid Colors (Match the aesthetic of the hardware you're targeting)
+    "GRID_BORDER": "#4B515C",
+}
+
 THEME = {
     "bg": "#0f0f0f",
     "surface": "#1a1a1a",     # Primary container/card background
@@ -45,7 +79,7 @@ THEME = {
     "border": "#2a2a2a",
     
     # Text colors
-    "text": "#e5e5e5",        # High contrast text
+    "text": "#ABB2BF",        # High contrast text
     "muted": "#9ca3af",       # Secondary/placeholder text
     
     # Primary Accent (Bright Green)
@@ -120,7 +154,7 @@ class CombinedEEPROMApp(ctk.CTk):
             # Fallback for Windows or other errors (not strictly needed on Mac)
             self.iconbitmap("icon.ico") 
             print(f"Icon loading error: {e}")
-        self.minsize(1800, 1200) 
+        self.minsize(1750, 1300) 
         
         # --- Resources ---
         self.binary_chars = self.load_char_map()
@@ -132,6 +166,10 @@ class CombinedEEPROMApp(ctk.CTk):
         self.current_tool = "paint"
         self.selected_color = "red"
         self.focused_cell = None
+        self.cursor_flash_timer = None # Holds the after() ID
+        self.cursor_state = "on"
+        self.cursor_width = 1 # Pixel thickness of the flashing border
+        self.cursor_color_on = "#FFFFFF" # Flashing color (white)
         self.selection_start = None
         self.selection_end = None
         self.selection_area = None # (r1, c1, r2, c2)
@@ -139,8 +177,11 @@ class CombinedEEPROMApp(ctk.CTk):
         self.virtual_files = {} 
         self.is_16bit = ctk.BooleanVar(value=True)
         self.boot_index = ctk.StringVar(value="0") 
-        
-        self.tool_var = ctk.StringVar(value="paint") # FIX: Initialized tool variable
+        self.tool_var = ctk.StringVar(value="paint")
+        self.unsaved_changes = False
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.log_history = []
+        self.max_log_entries = 100 # Keep history size manageable
 
         # --- Clipboard for Selection ---
         self.selection_clipboard = None
@@ -164,8 +205,60 @@ class CombinedEEPROMApp(ctk.CTk):
         self.setup_designer_tab()
         self.setup_encoder_tab()
         self.setup_charmap_tab()
+        self.setup_log_tab()
         self.bind("<Key>", self.handle_keypress)
         self.clear_grid(confirm=False) 
+
+    def perform_update(self):
+        """
+        Downloads the new .exe and launches the external Python helper script
+        to perform the replacement after the main app closes.
+        """
+    
+        if not self.latest_download_url:
+            self.log("Update failed: No download URL found.", "error")
+            return
+
+        self.log(f"Starting download of new executable...", "warn")
+    
+        try:
+            # 1. DEFINE PATHS
+            # The directory containing the current EXE and where the helper script lives
+            app_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+        
+            # Path for the downloaded new executable
+            temp_new_exe_path = os.path.join(app_dir, TEMP_NEW_EXE_NAME)
+            # Path to the helper script (which PyInstaller extracted next to the EXE)
+            helper_script_path = os.path.join(app_dir, HELPER_SCRIPT_NAME)
+        
+            # 2. DOWNLOAD THE NEW EXECUTABLE
+            update_response = requests.get(self.latest_download_url, stream=True)
+            update_response.raise_for_status()
+
+            with open(temp_new_exe_path, 'wb') as f:
+                shutil.copyfileobj(update_response.raw, f)
+        
+            self.log("Download complete. Launching external updater.", "info")
+
+            # 3. LAUNCH THE HELPER SCRIPT AND TERMINATE MAIN APP
+        
+            # Check if the helper script exists (it should, thanks to --add-file)
+            if not os.path.exists(helper_script_path):
+                 self.log(f"Error: Helper script '{HELPER_SCRIPT_NAME}' not found.", "error")
+                 messagebox.showerror("Update Failed", "Internal error: Updater file missing.")
+                 return
+
+            # Launch the helper script using the Python interpreter (since it's a .py file)
+            # The helper script takes an argument to prevent accidental execution
+            subprocess.Popen([sys.executable, helper_script_path, "--update-trigger"])
+        
+            # 4. Terminate the current application immediately
+            self.log("Exiting main application to allow replacement...", "warn")
+            self.destroy() 
+        
+        except Exception as e:
+            self.log(f"Self-update preparation failed: {e}", "error")
+            messagebox.showerror("Update Failed", f"The update preparation encountered an error: {e}")
 
     def load_char_map(self):
         try:
@@ -211,22 +304,26 @@ class CombinedEEPROMApp(ctk.CTk):
         container.grid_rowconfigure(0, weight=1)
         
         # Drawing Area (Center) - Ensures the grid is centered
-        draw_frame = tk.Frame(container, bg=THEME["surface_2"])
+        draw_frame = ctk.CTkFrame(container, fg_color=THEME["surface_2"], corner_radius=10)
         draw_frame.grid(row=0, column=0, sticky="nsew")
         
         # Centering the grid within the frame
         self.grid_inner = tk.Frame(draw_frame, bg="#202020")
         self.grid_inner.pack(expand=True, padx=20, pady=20) 
-        
+        FONT_NAME = globals().get('FONT_FAMILY', "Arial")
+        NEW_FONT = (FONT_NAME, 18, "bold")
         # Grid initialization (kept mostly the same for functionality)
         self.cells = {}
         # Assuming GRID_SIZE, UI_COLORS, and relevant commands are defined elsewhere
         for r in range(GRID_SIZE):
             for c in range(GRID_SIZE):
-                cell = tk.Label(self.grid_inner, text=" ", width=6, height=3, # Slightly more compact grid
-                                font=("Courier New", 12, "bold"), bg=UI_COLORS["black"],
-                                fg="white", relief="flat", bd=1)
-                cell.grid(row=r, column=c, padx=1, pady=1)
+                cell = tk.Label(self.grid_inner, text=" ", width=5, height=2, # Slightly more compact grid
+                                font=NEW_FONT, bg=UI_COLORS["black"],
+                                fg="white", relief="flat", bd=1,              
+                                highlightbackground="#202020", 
+                                highlightcolor="#202020", 
+                                highlightthickness=self.cursor_width)
+                cell.grid(row=r, column=c, padx=0, pady=0)
                 
                 cell.bind("<Button-1>", lambda e, row=r, col=c: self.on_cell_down(e, row, col))
                 cell.bind("<B1-Motion>", self.on_cell_drag)
@@ -343,6 +440,124 @@ class CombinedEEPROMApp(ctk.CTk):
             command=self.send_to_encoder,
         ).pack(fill="x", padx=15, pady=(5, 15))
 
+        self.mark_saved()
+
+    def setup_log_tab(self):
+        """Creates the 'Log/Info' tab with a scrollable text display."""
+        log_tab = self.tabview.add("Log/Info")
+        log_tab.columnconfigure(0, weight=1)
+        log_tab.rowconfigure(0, weight=1)
+
+        # Use CTkTextbox for multiline, scrollable text (more modern look than tk.Text)
+        self.log_display = ctk.CTkTextbox(
+            log_tab, 
+            wrap="word", # Wrap lines at word boundaries
+            width=500, 
+            height=350,
+            font=(FONT_FAMILY, 12),
+            text_color=PALETTE["TEXT_NORMAL"],
+            fg_color=PALETTE["BG_SECONDARY"] # Slightly different background for the text area
+        )
+        self.log_display.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        
+        # Make the textbox read-only
+        self.log_display.configure(state="disabled")
+
+        # Add tags for color-coding log levels (optional, but highly recommended)
+        self.log_display.tag_config("info", foreground=PALETTE["TEXT_NORMAL"])
+        self.log_display.tag_config("warn", foreground=PALETTE["TEXT_WARN"])
+        self.log_display.tag_config("error", foreground=PALETTE["TEXT_ERROR"])
+
+        self.log("V1.6.8 Loaded Successfully!", "info")
+        self.log("---------------------------", "info")
+        self.log("Made by clt_mm", "info")
+        self.log("", "info")
+        self.log("Update Log:", "info")
+        self.log("+ Logs Tab", "info")
+        self.log("+ UI Fixes (Text Editor and Grid Sizing/Spacing)", "info")
+        self.log("+ UI Coloring and Padding", "info")
+        self.log("", "info")
+
+    def mark_unsaved(self):
+        """Marks the project as modified and updates the title."""
+        if not self.unsaved_changes:
+            self.unsaved_changes = True
+            self.title("BuildLogic Panel Studio Pro * (Unsaved)")
+
+    def mark_saved(self):
+        """Resets the modified flag and title."""
+        self.unsaved_changes = False
+        self.title("BuildLogic Panel Studio Pro")
+
+    def on_closing(self):
+        """Triggered when the user tries to close the window."""
+        if self.unsaved_changes:
+            # Ask: Yes (Save), No (Discard), Cancel (Don't Close)
+            response = messagebox.askyesnocancel("Unsaved Changes", "You have unsaved changes. Save before quitting?")
+            
+            if response is None:  # Cancel was pressed
+                return  # Do nothing, stay open
+            
+            if response:  # Yes was pressed
+                if not self.save_project(): 
+                    return  # If save failed or was cancelled, stay open
+        
+        # If response was No (False) or save succeeded, close the app
+        self.destroy()
+
+    # --- OPTIMIZATION: Compression Methods ---
+    def compress_grid(self):
+        """Compresses the current grid using Run-Length Encoding (RLE)."""
+        rle_data = []
+        if not self.grid_data: return []
+
+        # Flatten the 2D grid into a 1D stream
+        flat_cells = [self.grid_data[r][c] for r in range(GRID_SIZE) for c in range(GRID_SIZE)]
+        
+        if not flat_cells: return []
+
+        current_char = flat_cells[0]['char']
+        current_color = flat_cells[0]['color']
+        count = 1
+
+        for i in range(1, len(flat_cells)):
+            cell = flat_cells[i]
+            # If this cell matches the previous one, just increase the counter
+            if cell['char'] == current_char and cell['color'] == current_color:
+                count += 1
+            else:
+                # Sequence ended, store the run: [count, char, color]
+                rle_data.append([count, current_char, current_color])
+                current_char = cell['char']
+                current_color = cell['color']
+                count = 1
+        
+        # Append the final run
+        rle_data.append([count, current_char, current_color])
+        return rle_data
+
+    def decompress_grid(self, rle_data):
+        """Decompresses RLE data back into the standard grid format."""
+        new_grid = [[{'char': ' ', 'color': 'black'} for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
+        
+        # Reconstruct the flat list
+        flat_cells = []
+        for run in rle_data:
+            count, char, color = run
+            for _ in range(count):
+                flat_cells.append({'char': char, 'color': color})
+        
+        # Fill the 2D grid safely
+        idx = 0
+        total_cells = GRID_SIZE * GRID_SIZE
+        for r in range(GRID_SIZE):
+            for c in range(GRID_SIZE):
+                if idx < len(flat_cells):
+                    new_grid[r][c] = flat_cells[idx]
+                    idx += 1
+        
+        return new_grid
+
     def update_cell_info(self, row, col):
         # Assuming you have a design_grid_data structure holding the raw color values (0-7, or hex/name)
         # Assuming your UI_COLORS dictionary maps names to hex, and you have a reverse map to binary.
@@ -445,6 +660,7 @@ class CombinedEEPROMApp(ctk.CTk):
     def paint_cell(self, r, c, color=None):
         color = color if color else self.selected_color
         self.grid_data[r][c]['color'] = color
+        self.mark_unsaved()
         
         # Update UI
         fg = "black" if color in ["white", "yellow", "cyan", "bright_green", "bright_red", "bright_blue"] else "white"
@@ -453,35 +669,104 @@ class CombinedEEPROMApp(ctk.CTk):
                 widget.config(bg=UI_COLORS[color], fg=fg)
                 self.update_selection_highlight(widget, (r, c)) 
                 break
-
-    def set_text_focus(self, r, c):
-        self.clear_focus()
-        self.focused_cell = (r, c)
-        
-        # Update focus highlight & Live Info
+    
+    def cursor_blink(self):
+        """Manages the visual flashing of the cursor on the focused cell."""
+        if not self.focused_cell:
+            return
+            
+        r, c = self.focused_cell
+        focused_widget = None
         for widget, coords in self.cells.items():
             if coords == (r, c):
-                widget.config(relief="solid", bd=2)
-                
-                # Live Preview update on focus
-                addr = r * GRID_SIZE + c
-                cell = self.grid_data[r][c]
-                char_bin = self.binary_chars.get(cell['char'], "0000000").rjust(7, "0")
-                color_bin = COLOR_MAP[cell['color']]
-                leading_bits = "111" if self.is_16bit.get() else "000"
-                full_bin = leading_bits + color_bin + char_bin
-                self.lbl_cell_info.configure(text=f"Addr: {addr} (R{r}, C{c})\nBIN: {full_bin}\nDEC: {int(full_bin, 2)}")
+                focused_widget = widget
                 break
 
+        if focused_widget:
+            # Get the current background color to 'hide' the cursor
+            current_bg = self.grid_data[r][c]['color']
+
+            if self.cursor_state == "on":
+                # Cursor 'off' state: Use the cell's background color to hide the highlight
+                focused_widget.config(
+                    highlightbackground="#202020", 
+                    highlightcolor="#202020", 
+                    highlightthickness=self.cursor_width
+                )
+                self.cursor_state = "off"
+            else:
+                # Cursor 'on' state: Show the white cursor border
+                focused_widget.config(
+                    highlightbackground=self.cursor_color_on, 
+                    highlightcolor=self.cursor_color_on, 
+                    highlightthickness=self.cursor_width
+                )
+                self.cursor_state = "on"
+
+        # Schedule the next blink (500ms is a standard rate)
+        self.cursor_flash_timer = self.after(500, self.cursor_blink)
+
+    def set_text_focus(self, r, c):
+        
+        # 1. Clear previous state and stop timer
+        self.clear_focus()
+        self.focused_cell = (r, c)
+    
+        # 2. Find the widget and apply initial focus visual (ON state)
+        focused_widget = None
+        for widget, coords in self.cells.items():
+            if coords == (r, c):
+                focused_widget = widget
+                break
+
+        if focused_widget:
+            # Set the widget to the initial 'ON' state for the flashing cursor
+            focused_widget.config(
+                highlightbackground=self.cursor_color_on, 
+                highlightcolor=self.cursor_color_on, 
+                highlightthickness=self.cursor_width, 
+                relief="flat" # Ensure it is flat so the highlight takes precedence
+            )
+
+        # 3. Start the blinking timer
+        self.cursor_state = "on"
+        self.cursor_flash_timer = self.after(500, self.cursor_blink)
+    
+        # Use the logic you provided:
+        if focused_widget:
+            addr = r * GRID_SIZE + c
+            cell = self.grid_data[r][c]
+            # Ensure you handle potentially missing keys in binary_chars safely
+            char_bin = self.binary_chars.get(cell['char'], "0000000").rjust(7, "0") 
+            color_bin = COLOR_MAP[cell['color']] # Assuming COLOR_MAP is defined
+            leading_bits = "111" if self.is_16bit.get() else "000"
+            full_bin = leading_bits + color_bin + char_bin
+            self.lbl_cell_info.configure(text=f"Addr: {addr} (R{r}, C{c})\nBIN: {full_bin}\nDEC: {int(full_bin, 2)}")
+
     def clear_focus(self):
+        """Clears focus from the currently selected cell, stops blinking, and resets visual state."""
+        
+        # Stop the blinking process first
+        if self.cursor_flash_timer:
+            self.after_cancel(self.cursor_flash_timer)
+            self.cursor_flash_timer = None
+
         if self.focused_cell:
             r, c = self.focused_cell
+            
+            # Find the widget and reset its appearance
             for widget, coords in self.cells.items():
                 if coords == (r, c):
-                    widget.config(relief="flat", bd=1)
-                    self.update_selection_highlight(widget, (r, c))
+                    # Reset the border and remove the highlight box
+                    widget.config(
+                        highlightbackground="#202020", 
+                        highlightcolor="#202020", 
+                        highlightthickness=self.cursor_width
+                    )
                     break
+            
             self.focused_cell = None
+
         self.lbl_cell_info.configure(text="Addr: --\nBIN: --\nDEC: --")
 
     def clear_selection(self):
@@ -542,50 +827,90 @@ class CombinedEEPROMApp(ctk.CTk):
             widget.config(relief="flat", bd=1)
 
 
-    # --- FEATURE: Sequential Typing ---
     def handle_keypress(self, event):
-        if self.tabview.get() != "Pixel Designer" or self.current_tool != "text" or not self.focused_cell:
+        # 1. Scope Check: Only run if in Designer tab
+        if self.tabview.get() != "Pixel Designer": return
+
+        # 2. auto-focus (0,0) if nothing is selected and a nav key is pressed
+        if not self.focused_cell:
+            if event.keysym in ["Up", "Down", "Left", "Right", "Return"]:
+                self.set_text_focus(0, 0)
             return
-        
-        key = event.char
+
         r, c = self.focused_cell
-        
-        if event.keysym == "BackSpace": 
-            key = " "
+        sym = event.keysym
+
+        # --- NAVIGATION LOGIC (Stays the same) ---
+        if sym == "Up":
+            self.set_text_focus((r - 1) % GRID_SIZE, c)
+            return
+        elif sym == "Down":
+            self.set_text_focus((r + 1) % GRID_SIZE, c)
+            return
+        elif sym == "Left":
+            self.set_text_focus(r, (c - 1) % GRID_SIZE)
+            return
+        elif sym == "Right":
+            self.set_text_focus(r, (c + 1) % GRID_SIZE)
+            return
+        elif sym == "Return":
+            self.set_text_focus((r + 1) % GRID_SIZE, 0)
+            return
+
+        # --- TYPING LOGIC (Only if Text Tool is active) ---
+        if self.current_tool != "text": return
+
+        # --- BACKSPACE ACTION (NEW FLOW) ---
+        if sym == "BackSpace":
             
-        
+            # 1. Roadblock check: If at (0, 0), just stay put.
+            if r == 0 and c == 0:
+                return 
+
+            # 2. Calculate the position of the character to be cleared
+            prev_c, prev_r = c, r
+            prev_c -= 1
+
+            if prev_c < 0: # Wrap to previous line end
+                prev_c = GRID_SIZE - 1
+                prev_r = (prev_r - 1 + GRID_SIZE) % GRID_SIZE 
+
+            # 3. Clear the character at the new cursor location (where the cursor moves to)
+            self.grid_data[prev_r][prev_c]['char'] = " "
+            self.mark_unsaved()
+
+            # Update the UI widget at the new location
+            for widget, coords in self.cells.items():
+                if coords == (prev_r, prev_c):
+                    widget.config(text=" ")
+                    break
+                    
+            # 4. Move the focus (cursor) to the new position (prev_r, prev_c)
+            self.set_text_focus(prev_r, prev_c)
+            return
+
+
+        # --- TYPING ACTION (Stays the same as previous forward typing logic) ---
+        key = event.char
+        # Only process valid characters
         if len(key) == 1 and (key in self.binary_chars or key == " "):
             
-            # 1. Update the current cell's character
+            # 1. Update Data & UI at current location (r, c)
             self.grid_data[r][c]['char'] = key
+            self.mark_unsaved()
             for widget, coords in self.cells.items():
                 if coords == (r, c):
                     widget.config(text=key)
                     break
-            
-            # 2. Sequential movement logic
-            self.clear_focus()
-            
+                    
+            # 2. Calculate and set focus to the next cell
             next_c, next_r = c, r
-            
-            if event.keysym == "BackSpace":
-                # Backspace moves left
-                next_c -= 1
-                if next_c < 0: # Wrap up
-                    next_c = GRID_SIZE - 1
-                    next_r -= 1
-            else:
-                # Typing moves right
-                next_c += 1
-                if next_c >= GRID_SIZE: # Wrap down
-                    next_c = 0
-                    next_r += 1
-            
-            # 3. Set focus on the next cell (if within bounds)
-            if 0 <= next_r < GRID_SIZE and 0 <= next_c < GRID_SIZE:
-                self.set_text_focus(next_r, next_c)
-            else:
-                self.focused_cell = None
+            next_c += 1
+            if next_c >= GRID_SIZE: # Wrap to next line start
+                next_c = 0
+                next_r = (next_r + 1) % GRID_SIZE
+
+            self.set_text_focus(next_r, next_c)
 
 
     def clear_grid(self, confirm=True):
@@ -598,6 +923,7 @@ class CombinedEEPROMApp(ctk.CTk):
         self.refresh_grid_ui()
         self.clear_focus()
         self.clear_selection()
+        self.mark_unsaved()
 
     # --- FEATURE: Flood Fill ---
     def flood_fill(self, r, c, target_color, fill_color):
@@ -667,6 +993,7 @@ class CombinedEEPROMApp(ctk.CTk):
         self.log(f"Grid transformed: {action}", "warn")
         self.clear_focus()
         self.clear_selection()
+        self.mark_unsaved()
 
     def refresh_grid_ui(self):
         for r in range(GRID_SIZE):
@@ -749,6 +1076,7 @@ class CombinedEEPROMApp(ctk.CTk):
                 self.refresh_grid_ui()
                 
         self.log(f"Pasted selection at R{r_anchor}, C{c_anchor}.", "warn")
+        self.mark_unsaved()
 
     def shift_selection(self, dr, dc):
         if not self.selection_area: return self.log("No selection to shift.", "error")
@@ -852,30 +1180,37 @@ class CombinedEEPROMApp(ctk.CTk):
 
             self.refresh_grid_ui()
             messagebox.showinfo("Imported", "File loaded successfully!")
+            self.mark_unsaved()
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
-    # --- FEATURE: Project Save/Load ---
     def save_project(self):
         fp = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON Project", "*.json")])
-        if not fp: return
+        if not fp: 
+            return False
         
+        # Use compression
+        compressed_data = self.compress_grid()
+
         project_data = {
-            "version": "1.0",
-            "grid_data": self.grid_data,
+            "version": "2.0", # Bump version to indicate new format
+            "compressed_grid": compressed_data, # Store the small RLE list
             "virtual_files": self.virtual_files,
             "files_to_encode": self.files_to_encode,
             "is_16bit": self.is_16bit.get(),
-            # Include the current binary chars in the project for stability
             "binary_chars": self.binary_chars 
         }
         
         try:
             with open(fp, "w") as f:
-                json.dump(project_data, f, indent=4)
-            self.log("Project saved successfully.", "warn")
+                json.dump(project_data, f, separators=(',', ':'))
+            
+            self.log(f"Project saved (Compressed). Size: {len(compressed_data)} runs.", "warn")
+            self.mark_saved() 
+            return True       
         except Exception as e:
             self.log(f"Error saving project: {e}", "error")
+            return False      
 
     def load_project(self):
         fp = filedialog.askopenfilename(filetypes=[("JSON Project", "*.json")])
@@ -885,18 +1220,26 @@ class CombinedEEPROMApp(ctk.CTk):
             with open(fp, "r") as f:
                 project_data = json.load(f)
             
-            self.grid_data = project_data.get("grid_data", self.grid_data)
+            # CHECK: Is this a new compressed file or an old one?
+            if "compressed_grid" in project_data:
+                # Decode the new compact format
+                self.grid_data = self.decompress_grid(project_data["compressed_grid"])
+                self.log("Loaded compressed project format (v2.0).", "info")
+            else:
+                # Fallback for old files
+                self.grid_data = project_data.get("grid_data", self.grid_data)
+                self.log("Loaded legacy project format.", "info")
+
             self.virtual_files = project_data.get("virtual_files", {})
             self.files_to_encode = project_data.get("files_to_encode", [])
             self.is_16bit.set(project_data.get("is_16bit", True))
             
-            # Load custom binary chars from project if available
             if "binary_chars" in project_data:
                 self.binary_chars = project_data["binary_chars"]
                 self.reverse_char_map = {v.rjust(7, "0"): k for k, v in self.binary_chars.items()}
 
             self.refresh_grid_ui()
-            self.setup_charmap_tab() # Refresh charmap UI in case chars changed
+            self.setup_charmap_tab()
             
             self.file_listbox.delete(0, "end")
             for p in self.files_to_encode:
@@ -905,6 +1248,7 @@ class CombinedEEPROMApp(ctk.CTk):
                 
             self.update_boot_options()
             self.log("Project loaded successfully.", "warn")
+            self.mark_saved()
             
         except Exception as e:
             self.log(f"Error loading project: {e}", "error")
@@ -1034,12 +1378,41 @@ class CombinedEEPROMApp(ctk.CTk):
         self.console.grid(row=6, column=0, sticky="nsew", padx=15, pady=(0, 15)) # OLD ROW 5
         self.console.configure(state="disabled")
     
-    def log(self, message, type="info"):
+    def log(self, message, level="info"):
+        """
+        Logs a message to the console and to the new Log/Info tab display.
+        Levels: 'info', 'warn', 'error'.
+        """
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        
+        log_entry = f"[{timestamp}][{level.upper().rjust(5)}] {message}\n"
+        
         self.console.configure(state="normal")
-        prefix = "[ERROR] " if type=="error" else "[WARN]  " if type=="warn" else "[INFO]  "
+        prefix = "[ERROR] " if type=="error" else "[WARN]  " if type=="warn" else "[INFO]  "
         self.console.insert("end", prefix + message + "\n")
         self.console.see("end")
-        self.console.configure(state="disabled")
+
+        # 1. Update internal history
+        self.log_history.append(log_entry)
+        
+        # Enforce history limit
+        if len(self.log_history) > self.max_log_entries:
+            self.log_history.pop(0)
+
+        # 2. Update the UI display
+        self.log_display.configure(state="normal") # Enable for writing
+        
+        # Insert the message
+        self.log_display.insert("end", log_entry, level)
+        
+        # Scroll to the bottom to show the latest entry
+        self.log_display.yview_moveto(1.0) 
+        
+        self.log_display.configure(state="disabled") # Disable again
+        
+        # 3. Print to console (useful for real-time debugging)
+        print(log_entry.strip())
 
     def add_encoder_file(self):
         fps = filedialog.askopenfilenames(filetypes=[("Text Files", "*.txt")])
