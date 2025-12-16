@@ -15,7 +15,7 @@ def update_and_restart():
     """
     Main function to wait for the old app to close, replace it, and restart.
     """
-    
+
     # 1. Define paths based on the location of this script
     # This script will be run from the same directory as the main EXE
     app_dir = os.path.dirname(os.path.abspath(sys.argv[0]))

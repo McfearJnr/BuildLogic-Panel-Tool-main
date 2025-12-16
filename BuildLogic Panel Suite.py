@@ -12,11 +12,12 @@ import requests
 import zipfile
 import shutil
 import subprocess
+import platform
 
 #Update Constants
-GITHUB_USER = "McfearJnr"      # <-- REPLACE THIS
-GITHUB_REPO = "BuildLogic-Panel-Tool-main"      # <-- REPLACE THIS
-CURRENT_VERSION = "1.4.9"               # <-- REPLACE THIS (Must be manually updated for each release)
+GITHUB_USER = "McfearJnr"
+GITHUB_REPO = "BuildLogic-Panel-Tool-main"
+CURRENT_VERSION = "1.7.9"               
 UPDATE_CHECK_URL = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
 DOWNLOAD_URL_BASE = f"https://github.com/{GITHUB_USER}/{GITHUB_REPO}/releases/download/"
 
@@ -207,7 +208,72 @@ class CombinedEEPROMApp(ctk.CTk):
         self.setup_charmap_tab()
         self.setup_log_tab()
         self.bind("<Key>", self.handle_keypress)
-        self.clear_grid(confirm=False) 
+        self.clear_grid(confirm=False)
+        self.after(5000, self.check_for_updates)
+
+    def check_for_updates(self):
+        """Checks GitHub for a new application release."""
+        self.log("Checking for updates...", "info")
+        
+        # --- Critical Check (Ensure constants are defined) ---
+        if not all(hasattr(self, attr) for attr in ['latest_download_url', 'latest_version']):
+             self.latest_download_url = None
+             self.latest_version = None
+
+        # Only proceed if we are running as a frozen executable (PyInstaller)
+        # Updates are risky and should only run in a deployed environment
+        if not getattr(sys, 'frozen', False):
+             self.log("Skipping update check: Running in development mode.", "info")
+             return
+        # ---------------------------------------------------
+
+        try:
+            # 1. Fetch the latest release information from GitHub API
+            response = requests.get(UPDATE_CHECK_URL, timeout=10)
+            response.raise_for_status() # Raise an exception for bad status codes (4xx or 5xx)
+            latest_release = response.json()
+            
+            # The tag name is usually the version number (e.g., "1.0.1")
+            latest_version_tag = latest_release.get("tag_name", "0.0.0").lstrip('vV') 
+            
+            # 2. Compare versions
+            # A more robust version check (though simple string comparison often works for standard versioning)
+            from packaging.version import parse
+            if parse(latest_version_tag) > parse(CURRENT_VERSION):
+                self.log(f"Update available: {latest_version_tag}. Current: {CURRENT_VERSION}", "warn")
+                
+                # 3. Find the asset (the file to download)
+                assets = latest_release.get("assets", [])
+                asset_name = TEMP_NEW_EXE_NAME 
+                
+                download_asset = next((a for a in assets if a['name'] == asset_name), None)
+
+                if download_asset:
+                    self.update_available = True
+                    # Store the required download URL and version
+                    self.latest_download_url = download_asset['browser_download_url']
+                    self.latest_version = latest_version_tag
+                    
+                    # Notify the user and offer to update
+                    self.show_update_notification()
+                    return
+
+            self.log("Application is up-to-date.", "info")
+
+        except requests.exceptions.RequestException as e:
+            self.log(f"Failed to check for updates (Network Error): {e}", "error")
+        except Exception as e:
+            self.log(f"Failed to check for updates: {e}", "error")
+
+    def show_update_notification(self):
+        """Presents a dialog asking the user to update."""
+        if self.update_available:
+            msg = (f"A new version ({self.latest_version}) is available!\n"
+                   f"Do you want to download and install the update now? "
+                   f"(App will restart.)")
+            
+            if messagebox.askyesno("Update Available", msg):
+                self.perform_update()
 
     def perform_update(self):
         """
@@ -220,6 +286,44 @@ class CombinedEEPROMApp(ctk.CTk):
             return
 
         self.log(f"Starting download of new executable...", "warn")
+
+        if platform.system() == "Windows":
+            # --- CRITICAL CHANGE FOR ELEVATION ---
+            
+            # The command uses 'cmd /c' and 'start' to run the Python interpreter
+            # with the 'runas' verb. This forces a UAC prompt for this specific command.
+            
+            # The full command to execute (the script is launched via the system's Python interpreter)
+            # Example: python.exe "C:\...\updater_helper.py" --update-trigger
+            cmd = f'"{sys.executable}" "{helper_script_path}" --update-trigger'
+            
+            try:
+                # Use os.system() or a simple subprocess.call for this
+                # We use the 'runas' verb via the shell to trigger the UAC prompt.
+                # NOTE: This will briefly flash a hidden console window as it starts the process.
+                # The UAC prompt will appear immediately after.
+                
+                # IMPORTANT: Windows 'runas' command is used here
+                # We use shell=True and the "runas" verb for the elevation prompt
+                subprocess.Popen(f'cmd /c start "" "{sys.executable}" "{helper_script_path}" --update-trigger', 
+                                 shell=True, 
+                                 creationflags=subprocess.SW_HIDE)
+                
+                self.log("UAC prompt launched. Exiting main application to allow replacement...", "warn")
+                
+                # Use os._exit(0) for an immediate, non-graceful exit to release the file lock.
+                os._exit(0) 
+                
+            except Exception as e:
+                self.log(f"Failed to launch elevated updater helper: {e}", "error")
+                messagebox.showerror("Update Error", "Failed to launch elevated updater helper.")
+                return
+        else:
+             # Handle non-Windows or fallback (using the previous non-elevated launch)
+             # NOTE: You'll need to define startupinfo/creationflags here if you use this path
+             subprocess.Popen([sys.executable, helper_script_path, "--update-trigger"])
+             self.log("Exiting main application to allow replacement...", "warn")
+             os._exit(0)
     
         try:
             # 1. DEFINE PATHS
