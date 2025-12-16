@@ -280,14 +280,28 @@ class CombinedEEPROMApp(ctk.CTk):
         Downloads the new .exe and launches the external Python helper script
         to perform the replacement after the main app closes.
         """
-    
+        
         if not self.latest_download_url:
             self.log("Update failed: No download URL found.", "error")
             return
 
         self.log(f"Starting download of new executable...", "warn")
 
+        # 1. DEFINE PATHS (MOVED TO THE TOP)
+        # The directory containing the current EXE and where the helper script lives
+        app_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+        
+        # Path for the downloaded new executable (required for download)
+        temp_new_exe_path = os.path.join(app_dir, TEMP_NEW_EXE_NAME)
+        
+        # Path to the helper script (required for launch)
+        helper_script_path = os.path.join(app_dir, HELPER_SCRIPT_NAME)
+        
+        # --- End of Path Definitions ---
+
+        # 2. Check and Launch the Helper Script (Windows with Elevation)
         if platform.system() == "Windows":
+            
             # --- CRITICAL CHANGE FOR ELEVATION ---
             
             # The command uses 'cmd /c' and 'start' to run the Python interpreter
@@ -295,16 +309,10 @@ class CombinedEEPROMApp(ctk.CTk):
             
             # The full command to execute (the script is launched via the system's Python interpreter)
             # Example: python.exe "C:\...\updater_helper.py" --update-trigger
-            cmd = f'"{sys.executable}" "{helper_script_path}" --update-trigger'
+            # NOTE: cmd is not strictly needed here since it's only used once
             
             try:
-                # Use os.system() or a simple subprocess.call for this
-                # We use the 'runas' verb via the shell to trigger the UAC prompt.
-                # NOTE: This will briefly flash a hidden console window as it starts the process.
-                # The UAC prompt will appear immediately after.
-                
-                # IMPORTANT: Windows 'runas' command is used here
-                # We use shell=True and the "runas" verb for the elevation prompt
+                # IMPORTANT: We use shell=True and the "runas" verb for the elevation prompt
                 subprocess.Popen(f'cmd /c start "" "{sys.executable}" "{helper_script_path}" --update-trigger', 
                                  shell=True, 
                                  creationflags=subprocess.SW_HIDE)
@@ -324,42 +332,48 @@ class CombinedEEPROMApp(ctk.CTk):
              subprocess.Popen([sys.executable, helper_script_path, "--update-trigger"])
              self.log("Exiting main application to allow replacement...", "warn")
              os._exit(0)
-    
+             
+        # 3. DOWNLOAD THE NEW EXECUTABLE (This block should now be unreachable if the above if/else succeeds)
+        # Since the goal is to exit the app immediately after the UAC prompt, the download logic 
+        # must occur *before* the elevation launch. 
+        #
+        # Let's restructure to do the download first, then the launch/exit.
+
+        # --- RESTRUCTURING THE LOGIC ---
+
         try:
-            # 1. DEFINE PATHS
-            # The directory containing the current EXE and where the helper script lives
-            app_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-        
-            # Path for the downloaded new executable
-            temp_new_exe_path = os.path.join(app_dir, TEMP_NEW_EXE_NAME)
-            # Path to the helper script (which PyInstaller extracted next to the EXE)
-            helper_script_path = os.path.join(app_dir, HELPER_SCRIPT_NAME)
-        
-            # 2. DOWNLOAD THE NEW EXECUTABLE
+            # 1. DOWNLOAD THE NEW EXECUTABLE
             update_response = requests.get(self.latest_download_url, stream=True)
             update_response.raise_for_status()
 
+            # The current app is running, so it can download and write to Program Files.
+            # It's the subsequent DELETE/RENAME that requires Admin rights.
             with open(temp_new_exe_path, 'wb') as f:
                 shutil.copyfileobj(update_response.raw, f)
         
             self.log("Download complete. Launching external updater.", "info")
 
-            # 3. LAUNCH THE HELPER SCRIPT AND TERMINATE MAIN APP
-        
+            # 2. LAUNCH THE ELEVATED HELPER SCRIPT AND TERMINATE MAIN APP
+            
             # Check if the helper script exists (it should, thanks to --add-file)
             if not os.path.exists(helper_script_path):
                  self.log(f"Error: Helper script '{HELPER_SCRIPT_NAME}' not found.", "error")
                  messagebox.showerror("Update Failed", "Internal error: Updater file missing.")
                  return
 
-            # Launch the helper script using the Python interpreter (since it's a .py file)
-            # The helper script takes an argument to prevent accidental execution
-            subprocess.Popen([sys.executable, helper_script_path, "--update-trigger"])
-        
-            # 4. Terminate the current application immediately
+            if platform.system() == "Windows":
+                # Elevated launch
+                subprocess.Popen(f'cmd /c start "" "{sys.executable}" "{helper_script_path}" --update-trigger', 
+                                 shell=True, 
+                                 creationflags=subprocess.SW_HIDE)
+            else:
+                # Standard launch
+                subprocess.Popen([sys.executable, helper_script_path, "--update-trigger"])
+            
+            # 3. Terminate the current application immediately
             self.log("Exiting main application to allow replacement...", "warn")
-            self.destroy() 
-        
+            os._exit(0) 
+            
         except Exception as e:
             self.log(f"Self-update preparation failed: {e}", "error")
             messagebox.showerror("Update Failed", f"The update preparation encountered an error: {e}")
