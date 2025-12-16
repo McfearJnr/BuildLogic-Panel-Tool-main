@@ -275,7 +275,7 @@ class CombinedEEPROMApp(ctk.CTk):
         row, col = 0, 0
         max_cols = 5
         for name, hex_val in UI_COLORS.items():
-            ctk.CTkButton(palette_grid, text=" ", width=45, height=45, fg_color=hex_val, 
+            ctk.CTkButton(palette_grid, text=" ", width=40, height=40, fg_color=hex_val, 
                           hover_color=hex_val, corner_radius=6, 
                           command=lambda c=name: self.select_color(c)).grid(row=row, column=col, padx=4, pady=4)
             col += 1
