@@ -63,10 +63,18 @@ def update_and_restart():
             
             # 5. Restart the application
             print(f"[{os.path.basename(HELPER_SCRIPT_NAME)}] Restarting application...")
-            subprocess.Popen([current_exe_path])
+            
+            # --- FIX: DETACH PROCESS TO ALLOW CLEANUP ---
+            if sys.platform == 'win32':
+                # 0x00000008 is DETACHED_PROCESS on Windows.
+                # close_fds=True ensures file handles aren't inherited.
+                subprocess.Popen([current_exe_path], creationflags=0x00000008, close_fds=True)
+            else:
+                subprocess.Popen([current_exe_path], close_fds=True)
+            # --------------------------------------------
             
         else:
-            print(f"[{os.path.basename(HELPER_SCRIPT_NAME)}] Error: New executable file '{TEMP_NEW_EXE_NAME}' not found.")
+            print(f"[{os.path.basename(HELPER_SCRIPT_NAME)}] Error: New executable file ...")
 
     except Exception as e:
         print(f"[{os.path.basename(HELPER_SCRIPT_NAME)}] FATAL ERROR during replacement: {e}")

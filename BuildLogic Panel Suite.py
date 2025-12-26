@@ -1,6 +1,5 @@
 import customtkinter as ctk
 from PIL import Image, ImageTk
-#macos scaling (affect on windows not yet tested [!])
 ctk.set_widget_scaling(1)
 ctk.set_window_scaling(1)
 import tkinter as tk
@@ -17,13 +16,14 @@ import platform
 #Update Constants
 GITHUB_USER = "McfearJnr"
 GITHUB_REPO = "BuildLogic-Panel-Tool-main"
-CURRENT_VERSION = "1.7.9"               
+CURRENT_VERSION = "1.8.9"               
 UPDATE_CHECK_URL = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
+GITHUB_RELEASES_URL = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/releases/latest"
 DOWNLOAD_URL_BASE = f"https://github.com/{GITHUB_USER}/{GITHUB_REPO}/releases/download/"
 
 MAIN_EXE_NAME = "BuildLogic Panel Suite.exe" 
 TEMP_NEW_EXE_NAME = "LatestBuild.exe" 
-HELPER_SCRIPT_NAME = "updater_helper.py"
+HELPER_EXE_NAME = "updater.exe"
 
 # --- Utility Functions ---
 
@@ -139,6 +139,15 @@ class CombinedEEPROMApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
+        if platform.system() == "Windows":
+            try:
+                # Requires Windows 8.1 or later
+                import ctypes
+                ctypes.windll.shcore.SetProcessDpiAwareness(1) 
+            except Exception:
+                # Fallback for older Windows or if shcore isn't available
+                pass
+
         self.configure(fg_color=THEME["bg"])
         self.title("BuildLogic Panel Studio Pro")
         try:
@@ -155,7 +164,17 @@ class CombinedEEPROMApp(ctk.CTk):
             # Fallback for Windows or other errors (not strictly needed on Mac)
             self.iconbitmap("icon.ico") 
             print(f"Icon loading error: {e}")
-        self.minsize(1750, 1300) 
+        
+        #self.minsize(1750, 1300) 
+
+        MIN_SIDEBAR_WIDTH = 350 + 20  # Sidebar width + padding
+        MIN_GRID_SIZE = 900 # e.g., 10 cells * 15px minimum each = 150px
+        MIN_TOTAL_WIDTH = MIN_SIDEBAR_WIDTH + MIN_GRID_SIZE + 40 # 40 for main window padding
+
+        MIN_TOTAL_HEIGHT = MIN_GRID_SIZE + 95 # 40 for main window padding
+
+        # Set the minimum size on the root window
+        self.minsize(MIN_TOTAL_WIDTH, MIN_TOTAL_HEIGHT)
         
         # --- Resources ---
         self.binary_chars = self.load_char_map()
@@ -181,8 +200,11 @@ class CombinedEEPROMApp(ctk.CTk):
         self.tool_var = ctk.StringVar(value="paint")
         self.unsaved_changes = False
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self._resizing = False
         self.log_history = []
         self.max_log_entries = 100 # Keep history size manageable
+        self._resizing = False
+        self._resize_job_id = None
 
         # --- Clipboard for Selection ---
         self.selection_clipboard = None
@@ -277,106 +299,78 @@ class CombinedEEPROMApp(ctk.CTk):
 
     def perform_update(self):
         """
-        Downloads the new .exe and launches the external Python helper script
-        to perform the replacement after the main app closes.
+        Attempts to perform the automatic update. If it fails at any step, 
+        it logs the error and directs the user to manually download the installer.
         """
-        
+    
         if not self.latest_download_url:
             self.log("Update failed: No download URL found.", "error")
             return
 
-        self.log(f"Starting download of new executable...", "warn")
+        self.log(f"Attempting automatic update process...", "warn")
 
-        # 1. DEFINE PATHS (MOVED TO THE TOP)
-        # The directory containing the current EXE and where the helper script lives
+        # --- 1. DEFINE PATHS ---
         app_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-        
-        # Path for the downloaded new executable (required for download)
         temp_new_exe_path = os.path.join(app_dir, TEMP_NEW_EXE_NAME)
-        
-        # Path to the helper script (required for launch)
-        helper_script_path = os.path.join(app_dir, HELPER_SCRIPT_NAME)
-        
-        # --- End of Path Definitions ---
-
-        # 2. Check and Launch the Helper Script (Windows with Elevation)
-        if platform.system() == "Windows":
-            
-            # --- CRITICAL CHANGE FOR ELEVATION ---
-            
-            # The command uses 'cmd /c' and 'start' to run the Python interpreter
-            # with the 'runas' verb. This forces a UAC prompt for this specific command.
-            
-            # The full command to execute (the script is launched via the system's Python interpreter)
-            # Example: python.exe "C:\...\updater_helper.py" --update-trigger
-            # NOTE: cmd is not strictly needed here since it's only used once
-            
-            try:
-                # IMPORTANT: We use shell=True and the "runas" verb for the elevation prompt
-                subprocess.Popen(f'cmd /c start "" "{sys.executable}" "{helper_script_path}" --update-trigger', 
-                                 shell=True, 
-                                 creationflags=subprocess.SW_HIDE)
-                
-                self.log("UAC prompt launched. Exiting main application to allow replacement...", "warn")
-                
-                # Use os._exit(0) for an immediate, non-graceful exit to release the file lock.
-                os._exit(0) 
-                
-            except Exception as e:
-                self.log(f"Failed to launch elevated updater helper: {e}", "error")
-                messagebox.showerror("Update Error", "Failed to launch elevated updater helper.")
-                return
-        else:
-             # Handle non-Windows or fallback (using the previous non-elevated launch)
-             # NOTE: You'll need to define startupinfo/creationflags here if you use this path
-             subprocess.Popen([sys.executable, helper_script_path, "--update-trigger"])
-             self.log("Exiting main application to allow replacement...", "warn")
-             os._exit(0)
-             
-        # 3. DOWNLOAD THE NEW EXECUTABLE (This block should now be unreachable if the above if/else succeeds)
-        # Since the goal is to exit the app immediately after the UAC prompt, the download logic 
-        # must occur *before* the elevation launch. 
-        #
-        # Let's restructure to do the download first, then the launch/exit.
-
-        # --- RESTRUCTURING THE LOGIC ---
+        helper_exe_path = os.path.join(app_dir, HELPER_EXE_NAME)
 
         try:
-            # 1. DOWNLOAD THE NEW EXECUTABLE
+            # --- 2. DOWNLOAD THE NEW EXECUTABLE ---
+            self.log(f"Starting download of new executable to: {temp_new_exe_path}", "info")
+        
+            # NOTE: This is the step that might fail due to the certifi issue (TLS failure)
             update_response = requests.get(self.latest_download_url, stream=True)
             update_response.raise_for_status()
 
-            # The current app is running, so it can download and write to Program Files.
-            # It's the subsequent DELETE/RENAME that requires Admin rights.
+            # The current app can WRITE to Program Files, but not DELETE/RENAME.
             with open(temp_new_exe_path, 'wb') as f:
                 shutil.copyfileobj(update_response.raw, f)
-        
-            self.log("Download complete. Launching external updater.", "info")
 
-            # 2. LAUNCH THE ELEVATED HELPER SCRIPT AND TERMINATE MAIN APP
-            
-            # Check if the helper script exists (it should, thanks to --add-file)
-            if not os.path.exists(helper_script_path):
-                 self.log(f"Error: Helper script '{HELPER_SCRIPT_NAME}' not found.", "error")
-                 messagebox.showerror("Update Failed", "Internal error: Updater file missing.")
-                 return
+            self.log("Download complete. Launching external updater with elevation.", "info")
+
+            # --- 3. LAUNCH THE ELEVATED HELPER SCRIPT AND TERMINATE MAIN APP ---
+
+            if not os.path.exists(helper_exe_path):
+                # Try looking in the internal temp folder if bundled
+                helper_exe_path = resource_path(HELPER_EXE_NAME) 
+         
+            if not os.path.exists(helper_exe_path):
+                self.log(f"Updater not found at: {helper_exe_path}", "error")
+                return
 
             if platform.system() == "Windows":
-                # Elevated launch
-                subprocess.Popen(f'cmd /c start "" "{sys.executable}" "{helper_script_path}" --update-trigger', 
-                                 shell=True, 
-                                 creationflags=subprocess.SW_HIDE)
-            else:
-                # Standard launch
-                subprocess.Popen([sys.executable, helper_script_path, "--update-trigger"])
-            
-            # 3. Terminate the current application immediately
-            self.log("Exiting main application to allow replacement...", "warn")
-            os._exit(0) 
-            
+                # Launch the updater.exe directly. 
+                # We use 'start' to detach, and pass "--update-trigger"
+                subprocess.Popen(f'cmd /c start "" "{helper_exe_path}" --update-trigger', 
+                             shell=True)
+
+                self.log("UAC prompt launched. Exiting...", "warn")
+                os._exit(0) 
+
         except Exception as e:
-            self.log(f"Self-update preparation failed: {e}", "error")
-            messagebox.showerror("Update Failed", f"The update preparation encountered an error: {e}")
+            # --- FALLBACK LOGIC ---
+
+            # Log the specific error
+            self.log(f"Automatic self-update failed due to a critical error: {e}", "error")
+
+            # Clean up the partially downloaded file if it exists
+            if os.path.exists(temp_new_exe_path):
+                 os.remove(temp_new_exe_path)
+                 self.log("Cleaned up partial download.", "info")
+
+            # Present the user with the manual download option
+            fallback_msg = (
+                f"The automatic update failed to complete (Error: {type(e).__name__}).\n\n"
+                "To get the latest version, please manually download and run the installer "
+                "from our releases page. You must run this installer as an Administrator.\n\n"
+                f"Releases URL: {GITHUB_RELEASES_URL}"
+            )
+
+            messagebox.showerror("Update Failed - Manual Action Required", fallback_msg)
+
+            # The app remains open, user can continue using the old version
+            # You might want to shut down some background processes here if needed
+            return
 
     def load_char_map(self):
         try:
@@ -422,26 +416,41 @@ class CombinedEEPROMApp(ctk.CTk):
         container.grid_rowconfigure(0, weight=1)
         
         # Drawing Area (Center) - Ensures the grid is centered
-        draw_frame = ctk.CTkFrame(container, fg_color=THEME["surface_2"], corner_radius=10)
-        draw_frame.grid(row=0, column=0, sticky="nsew")
+        self.draw_frame = ctk.CTkFrame(container, fg_color=THEME["surface_2"], corner_radius=10)
+        self.draw_frame.grid(row=0, column=0, sticky="nsew")
         
-        # Centering the grid within the frame
-        self.grid_inner = tk.Frame(draw_frame, bg="#202020")
-        self.grid_inner.pack(expand=True, padx=20, pady=20) 
+        self.draw_frame.grid_columnconfigure(0, weight=1) 
+        self.draw_frame.grid_rowconfigure(0, weight=1)
+
+        self.grid_inner = tk.Frame(self.draw_frame, bg="#202020", width=900, height=900)
+
+        self.grid_inner.grid(row=0, column=0) 
+        self.grid_inner.grid_propagate(False)
+
+        for i in range(GRID_SIZE):
+            self.grid_inner.grid_columnconfigure(i, weight=1)
+            self.grid_inner.grid_rowconfigure(i, weight=1)
+
         FONT_NAME = globals().get('FONT_FAMILY', "Arial")
-        NEW_FONT = (FONT_NAME, 18, "bold")
+        NEW_FONT = (FONT_NAME, 22, "bold")
         # Grid initialization (kept mostly the same for functionality)
         self.cells = {}
         # Assuming GRID_SIZE, UI_COLORS, and relevant commands are defined elsewhere
         for r in range(GRID_SIZE):
             for c in range(GRID_SIZE):
-                cell = tk.Label(self.grid_inner, text=" ", width=5, height=2, # Slightly more compact grid
-                                font=NEW_FONT, bg=UI_COLORS["black"],
-                                fg="white", relief="flat", bd=1,              
-                                highlightbackground="#202020", 
-                                highlightcolor="#202020", 
-                                highlightthickness=self.cursor_width)
-                cell.grid(row=r, column=c, padx=0, pady=0)
+                # Fixed: We use padding to create the gap, and NO border/highlight on creation
+                cell = tk.Label(self.grid_inner, text=" ",
+                                # ... other options ...
+                                relief="flat", bd=1,         # Set border width to 0
+                                width=1,
+                                height=1,
+                                highlightbackground=UI_COLORS["black"], # Use a base color
+                                highlightcolor=UI_COLORS["black"],      # Use a base color
+                                highlightthickness=1)                   # Set highlight thickness to 0 initially
+
+                # CRITICAL CHANGE: Use padx/pady to create the fixed gap/border space
+                BORDER_GAP = 1 # Define a fixed gap size (e.g., 1 pixel)
+                cell.grid(row=r, column=c, padx=BORDER_GAP, pady=BORDER_GAP, sticky="nsew")
                 
                 cell.bind("<Button-1>", lambda e, row=r, col=c: self.on_cell_down(e, row, col))
                 cell.bind("<B1-Motion>", self.on_cell_drag)
@@ -458,11 +467,14 @@ class CombinedEEPROMApp(ctk.CTk):
         # ------------------ RIGHT SIDE: SIDEBAR (Column 1) ------------------
         sidebar = ctk.CTkFrame(self.tab_designer, width=350, fg_color=THEME["surface"], corner_radius=10)
         sidebar.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
-        
-        # Use a scrollable frame for the sidebar if tools/actions get too long
-        scroll_sidebar = ctk.CTkScrollableFrame(sidebar, fg_color="transparent")
-        scroll_sidebar.pack(fill="both", expand=True, padx=5, pady=5)
+        # Make the entire sidebar expandable (crucial for scrollable frame)
+        sidebar.grid_columnconfigure(0, weight=1) 
+        sidebar.grid_rowconfigure(0, weight=1)
 
+        # Use a scrollable frame for the sidebar
+        scroll_sidebar = ctk.CTkScrollableFrame(sidebar, fg_color="transparent")
+        # USE GRID: Tell it to fill the entire sidebar frame
+        scroll_sidebar.grid(row=0, column=0, sticky="nsew")
 
         # --- 1. TOOL SELECTION ---
         self.create_sidebar_heading(scroll_sidebar, "🔧 Drawing Tools")
@@ -559,6 +571,48 @@ class CombinedEEPROMApp(ctk.CTk):
         ).pack(fill="x", padx=15, pady=(5, 15))
 
         self.mark_saved()
+
+    def start_grid_resizing(self):
+        # Force the GUI to update immediately so we get real dimensions
+        self.draw_frame.update_idletasks() 
+        
+        # Now grab the real width/height
+        width = self.draw_frame.winfo_width()
+        height = self.draw_frame.winfo_height()
+        
+        # If it's still 1 (rare but possible), default to a safe size like 800
+        if width < 50: width = 800
+        if height < 50: height = 800
+
+        # Apply size immediately
+        self._apply_square_size(width, height)
+        
+        # Bind the live resize event for future changes
+        self.draw_frame.bind('<Configure>', self.enforce_square_grid)
+
+    def _apply_square_size(self, parent_width, parent_height):
+        # Remove the strict "< 50" return check, or make it smaller.
+        # If the window is tiny, we still want the grid to try to exist.
+        if parent_width < 10 or parent_height < 10:
+            return
+
+        square_size = min(parent_width, parent_height)
+        BUFFER = 80 
+        square_size -= BUFFER
+        square_size = max(100, square_size) # Ensure it never goes below 100px
+
+        self.grid_inner.configure(width=square_size, height=square_size)
+        self._resize_job_id = None
+
+    def enforce_square_grid(self, event=None):
+        if self._resize_job_id:
+            self.after_cancel(self._resize_job_id)
+
+        # It is safer to grab current dimensions directly in the lambda
+        # rather than relying on the 'event' object which might be stale by the time idle runs
+        self._resize_job_id = self.after_idle(
+            lambda: self._apply_square_size(self.draw_frame.winfo_width(), self.draw_frame.winfo_height())
+        )
 
     def setup_log_tab(self):
         """Creates the 'Log/Info' tab with a scrollable text display."""
@@ -807,8 +861,8 @@ class CombinedEEPROMApp(ctk.CTk):
             if self.cursor_state == "on":
                 # Cursor 'off' state: Use the cell's background color to hide the highlight
                 focused_widget.config(
-                    highlightbackground="#202020", 
-                    highlightcolor="#202020", 
+                    highlightbackground=UI_COLORS["black"],
+                    highlightcolor=UI_COLORS["black"], 
                     highlightthickness=self.cursor_width
                 )
                 self.cursor_state = "off"
@@ -877,8 +931,8 @@ class CombinedEEPROMApp(ctk.CTk):
                 if coords == (r, c):
                     # Reset the border and remove the highlight box
                     widget.config(
-                        highlightbackground="#202020", 
-                        highlightcolor="#202020", 
+                        highlightbackground=UI_COLORS["black"],
+                        highlightcolor=UI_COLORS["black"],
                         highlightthickness=self.cursor_width
                     )
                     break
